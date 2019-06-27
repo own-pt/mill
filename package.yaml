@@ -1,0 +1,57 @@
+name:                wntext
+version:             0.1.0.0
+github:              "own-pt/wntext"
+license:             Apache2
+author:              "Bruno Cuconato"
+maintainer:          "bcclaro+haskell@gmail.com"
+copyright:           "2019 IBM Corporation"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/own-pt/wntext#readme>
+
+
+default-extensions:
+- OverloadedStrings
+
+dependencies:
+- base >= 4.7 && < 5
+- megaparsec == 7.*
+- text == 1.*
+- generic-trie > 0.2.0 && < 1.0
+- mtl == 2.*
+- containers == 0.6.*
+
+library:
+  source-dirs: src
+
+executables:
+  wntext-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - wntext
+
+tests:
+  wntext-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - wntext
