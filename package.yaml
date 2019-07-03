@@ -1,7 +1,7 @@
 name:                wntext
 version:             0.1.0.0
 github:              "own-pt/wntext"
-license:             Apache2
+license:             Apache-2.0
 author:              "Bruno Cuconato"
 maintainer:          "bcclaro+haskell@gmail.com"
 copyright:           "2019 IBM Corporation"
