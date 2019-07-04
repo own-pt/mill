@@ -1,15 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 
 module Parse where
 
 import Control.Applicative hiding (some,many)
 import Control.Monad.State.Strict
 import Data.Char
+import Data.List.NonEmpty(NonEmpty)
 import Data.Either
-import Data.Bifunctor (bimap)
 import Data.Text (Text)
 import Data.Void (Void)
+import qualified Control.Applicative.Combinators.NonEmpty as NC
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 import qualified Data.Text as T
@@ -21,6 +21,7 @@ type WordSenseIdentifier = ( Text -- ^ Lexicographer file identifier
                            , Text -- ^ Word form
                            , Int  -- ^ Lexical identifier
                            )
+
 type SynsetIdentifier = WordSenseIdentifier
 type PointerName = Text
 type RelationName = Text
@@ -32,16 +33,17 @@ type FrameIdentifier = Int
 data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
   deriving (Show,Eq)
 
-data SynsetStatement
-  = WordSenseStatement WNWord
-  | DefinitionStatement Text
-  | ExampleStatement Text
-  | FramesStatement [Int]
-  | SynsetRelationStatement SynsetRelation
-  deriving (Show,Eq)
+type RawSynset = Either (ParseError Text Void) SynsetToValidate
 
-type RawSynsetStatement = Either (ParseError Text Void) SynsetStatement
-type RawSynset = (Int, [RawSynsetStatement])
+data SynsetToValidate = SynsetToValidate
+  { sourcePosition       :: Int
+  , lexicographerFileId  :: Text
+  , wordSenses           :: NonEmpty WNWord
+  , definition           :: Text
+  , examples             :: [Text]
+  , frames               :: [Int]
+  , relations            :: NonEmpty SynsetRelation
+  } deriving (Show,Eq)
 ---
 
 
@@ -50,26 +52,15 @@ type RawSynset = (Int, [RawSynsetStatement])
 type Parser = ParsecT Void Text (State Text)
 
 parseLexicographer :: String -> Text
-  -> Either String (Text, Int, [(Int, [SynsetStatement])])
+  -> Either String (Text, Int, [SynsetToValidate])
 parseLexicographer fileName inputText =
   case evalState (runParserT lexicographerFile fileName inputText) "all.all" of
     Right (lexicographerFileName, lexicographerIdentifier, rawSynsets)
-      -> let (parseErrors, synsetStatementsWithOffsets) = partitionEithers $ map findParseErrors rawSynsets
-         in if null parseErrors
-            then Right (lexicographerFileName, lexicographerIdentifier, synsetStatementsWithOffsets)
-            else Left $ unlines parseErrors
+      -> case partitionEithers rawSynsets of
+           ([], synsetsToValidate) ->
+             Right (lexicographerFileName, lexicographerIdentifier, synsetsToValidate)
+           (parseErrors, _) -> Left $ concatMap parseErrorPretty parseErrors
     Left errors -> Left $ errorBundlePretty errors
-  where
-    findParseErrors :: RawSynset -> Either String (Int, [SynsetStatement])
-    findParseErrors (offset, rawSynsetStmts) = bimap id (offset,)
-      $ go [] [] rawSynsetStmts
-    go :: [ParseError Text Void] -> [SynsetStatement] -> [RawSynsetStatement] -> Either String [SynsetStatement]
-    go [] synsetStatements [] = Right synsetStatements
-    go parseErrors _ [] = Left $ concatMap parseErrorPretty $ reverse parseErrors
-    go parseErrors synsetStatements (Left parseError:rawSynsetStatements) =
-      go (parseError:parseErrors) synsetStatements rawSynsetStatements
-    go parseErrors synsetStatements (Right synsetStmt:rawSynsetStatements) =
-      go parseErrors (synsetStmt:synsetStatements) rawSynsetStatements
 
 
 lexicographerFile :: Parser (Text, Int, [RawSynset])
@@ -79,29 +70,26 @@ lexicographerFile = do
   lexicographerFileNumber <- integer <?> "Lexicographer file identifier"
   put lexicographerFileName
   _ <- linebreaks
-  synsetsStatements <- synsets
+  rawSynsets <- synsets
   _ <- eof
-  return (lexicographerFileName, lexicographerFileNumber, synsetsStatements)
+  return (lexicographerFileName, lexicographerFileNumber, rawSynsets)
 
 synsets :: Parser [RawSynset]
-synsets = synset `sepEndBy1` many linebreak
-
-synset :: Parser RawSynset
-synset = (,) <$> getOffset <*> someTill (synsetStatementOrError <* linebreak) linebreak
-
-synsetStatementOrError :: Parser RawSynsetStatement
-synsetStatementOrError = withRecovery recover (Right <$> synsetStatement)
+synsets = synsetOrError `sepEndBy1` many linebreak
   where
-    recover :: ParseError Text Void -> Parser RawSynsetStatement
-    recover err = Left err <$ textBlock
+    synsetOrError = withRecovery recover (Right <$> synset)
+    recover :: ParseError Text Void -> Parser RawSynset
+    recover err = Left err <$ manyTill anySingle (try $ count 2 linebreak)
 
-synsetStatement :: Parser SynsetStatement
-synsetStatement = lexeme $
-  WordSenseStatement       <$> wordSenseStatement      <|>
-  DefinitionStatement      <$> definitionStatement     <|>
-  ExampleStatement         <$> exampleStatement        <|>
-  FramesStatement          <$> framesStatement         <|>
-  SynsetRelationStatement  <$> synsetRelationStatement
+synset :: Parser SynsetToValidate
+synset = SynsetToValidate
+  <$> getOffset
+  <*> get
+  <*> wordSenseStatement `NC.endBy1` linebreak
+  <*> definitionStatement <* linebreak
+  <*> exampleStatement `endBy` linebreak
+  <*> framesStatement <* linebreak
+  <*> synsetRelationStatement `NC.endBy1` linebreak
 
 spaceConsumer :: Parser ()
 -- comments will only be allowed as statements, because we want to

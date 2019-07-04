@@ -1,5 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 
 module Process where
@@ -7,6 +7,8 @@ module Process where
 --import Control.Monad
 --import Data.Char
 import Data.List
+import Data.List.NonEmpty(NonEmpty((:|)))
+import qualified Data.List.NonEmpty as NE
 --import Data.Traversable
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -15,47 +17,17 @@ import Data.GenericTrie
 import Parse hiding (synset,synsets,lexicalIdentifier,wordSensePointers)
 
 
-data SynsetToValidate = SynsetToValidate
-  { lexicographerFileId  :: Text
-  , wordSenses           :: [WNWord]
-  , relations            :: [SynsetRelation]
-  , definition           :: Text
-  , examples             :: [Text]
-  , frames               :: [Int]
-  , sourcePosition       :: Int
-  } deriving (Show,Eq)
+
 
 data Synset = Synset
-  { lexicographerFileId  :: Text
-  , wordSenses           :: [WNWord]
-  , relations            :: [SynsetRelation]
+  { sourcePosition       :: Int
+  , lexicographerFileId  :: Text
+  , wordSenses           :: NonEmpty WNWord
   , definition           :: Text
   , examples             :: [Text]
   , frames               :: [Int]
-  , sourcePosition       :: Int
+  , relations            :: NonEmpty SynsetRelation
   } deriving (Show,Eq)
-
-
-processLexicographerFile :: (Text, Int, [(Int, [SynsetStatement])]) -> [SynsetToValidate]
-processLexicographerFile (lexicographerFileName, _, synsetsComponents) =
-  map go synsetsComponents
-  where
-    go (offset, synsetStatements) = toSynset (synsetSkeleton offset) synsetStatements
-    synsetSkeleton = SynsetToValidate lexicographerFileName [] [] "" [] []
-    toSynset :: SynsetToValidate -> [SynsetStatement] -> SynsetToValidate
-    toSynset synset [] = synset
-    toSynset synset@SynsetToValidate{wordSenses} (WordSenseStatement wnWord : remainingStatements) =
-      toSynset (synset {wordSenses = wnWord : wordSenses}) remainingStatements
-    toSynset synset@SynsetToValidate{relations} (SynsetRelationStatement relation : remainingStatements) =
-      toSynset (synset {relations = relation : relations}) remainingStatements
-    toSynset synset (DefinitionStatement definition : remainingStatements) =
-      -- only one definition is allowed, and this has already been checked (TODO)
-      toSynset (synset {definition = definition}) remainingStatements
-    toSynset synset@SynsetToValidate{examples} (ExampleStatement example : remainingStatements) =
-      toSynset (synset {examples = example : examples}) remainingStatements
-    toSynset synset (FramesStatement frames : remainingStatements) =
-      -- only one frames statement is allowed, and this has already been checked (TODO)
-      toSynset (synset {frames = frames}) remainingStatements
 
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
@@ -67,7 +39,7 @@ makeIndex :: [SynsetToValidate] -> Index SynsetToValidate
 makeIndex synsets = fromList keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
-    synsetPairs synset@SynsetToValidate{wordSenses = (headWordSense:wordSenses)} = -- the fact that this is non-empty can be checked during parsing
+    synsetPairs synset@SynsetToValidate{wordSenses = (headWordSense:|wordSenses)} = -- the fact that this is non-empty can be checked during parsing
       let headSenseKey = wordSenseKey headWordSense
       in
         (headSenseKey, Right synset) : map (\wordSense -> (wordSenseKey wordSense, Left headSenseKey)) wordSenses
@@ -99,26 +71,27 @@ instance Semigroup e => Applicative (Validation e) where
 
 data WNError = MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
-  | UnsortedSynsetWordSenses [Text]
+  | UnsortedSynsetWordSenses (NonEmpty Text)
   deriving (Eq,Show)
   -- [] how to include source info?
 
 checkSynset :: Index a -> SynsetToValidate -> Validation [WNError] Synset
-checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
-  Synset <$>
-  Success lexicographerFileId <*>
-  checkWordSenses index wordSenses <*>
-  checkSynsetRelationsTargets index relations <*>
-  Success definition <*>
-  Success examples <*>
-  Success frames <*> -- [ ] check frames
-  Success sourcePosition
+checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} = Synset
+  <$> Success sourcePosition
+  <*> Success lexicographerFileId
+  <*> checkWordSenses index wordSenses
+  <*> Success definition
+  <*> Success examples
+  <*> Success frames -- [ ] check frames
+  <*> checkSynsetRelationsTargets index relations
+
 
 --- use <*> for validation, or <*? see
 --- https://www.reddit.com/r/haskell/comments/7hqodd/pure_functional_validation/
 
 -- [] also check order
-checkSynsetRelationsTargets :: Index a -> [SynsetRelation] -> Validation [WNError] [SynsetRelation]
+checkSynsetRelationsTargets :: Index a -> NonEmpty SynsetRelation
+  -> Validation [WNError] (NonEmpty SynsetRelation)
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
     checkSynsetRelation synsetRelation@(SynsetRelation _ (lexFileId, wordForm, lexicalId)) =
@@ -128,7 +101,7 @@ checkSynsetRelationsTargets index = traverse checkSynsetRelation
       where
         targetSenseKey = senseKey wordForm lexFileId lexicalId
 
-checkWordSenses :: Index a -> [WNWord] -> Validation [WNError] [WNWord]
+checkWordSenses :: Index a -> NonEmpty WNWord -> Validation [WNError] (NonEmpty WNWord)
 checkWordSenses index wordSenses =
   checkWordSensesOrder wordSenses <* checkWordSensesPointerTargets index wordSensePointers
   where
@@ -147,14 +120,14 @@ checkWordSensesPointerTargets index = traverse checkWordPointer
       where
         targetSenseKey = senseKey wordForm lexFileId lexicalId
 
-checkWordSensesOrder :: [WNWord] -> Validation [WNError] [WNWord]
+checkWordSensesOrder :: NonEmpty WNWord -> Validation [WNError] (NonEmpty WNWord)
 checkWordSensesOrder wordSenses =
   if sortedWordForms /= wordForms
   then Failure [UnsortedSynsetWordSenses sortedWordForms]
   else Success wordSenses
   where
-    sortedWordForms = sort wordForms
-    wordForms = map (\(WNWord (_, wordForm, _) _ _) -> wordForm) wordSenses
+    sortedWordForms = NE.sort wordForms
+    wordForms = NE.map (\(WNWord (_, wordForm, _) _ _) -> wordForm) wordSenses
 
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
