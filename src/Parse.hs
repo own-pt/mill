@@ -20,25 +20,25 @@ import qualified Text.Megaparsec.Char.Lexer as L
 ---
 
 
-type WordSenseIdentifier = (Maybe Text, Text, Int)
-type SynsetIdentifier = (Maybe Text, Text, Int)
+type ImplicitWordSenseIdentifier = (Maybe Text, Text, Int)
+type ImplicitSynsetIdentifier = ImplicitWordSenseIdentifier
 type PointerName = Text
 type RelationName = Text
-data WordPointer = WordRelation PointerName WordSenseIdentifier
+data ImplicitWordPointer = ImplicitWordPointer PointerName ImplicitWordSenseIdentifier
   deriving (Show,Eq)
-data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
+data ImplicitSynsetRelation = ImplicitSynsetRelation RelationName ImplicitSynsetIdentifier
   deriving (Show,Eq)
 type FrameIdentifier = Int
-data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
+data ImplicitWNWord = ImplicitWNWord ImplicitWordSenseIdentifier [FrameIdentifier] [ImplicitWordPointer]
   deriving (Show,Eq)
 
 type Parser = Parsec Void Text
 data SynsetStatement
-  = WordSenseStatement WNWord
+  = WordSenseStatement ImplicitWNWord
   | DefinitionStatement Text
   | ExampleStatement Text
   | FramesStatement [Int]
-  | SynsetRelationStatement SynsetRelation
+  | SynsetRelationStatement ImplicitSynsetRelation
   deriving (Show,Eq)
 
 type RawSynsetStatement = Either (ParseError Text Void) SynsetStatement
@@ -122,19 +122,19 @@ definitionStatement = statement "d" textBlock
 exampleStatement :: Parser Text
 exampleStatement = statement "e" textBlock
 
-synsetRelationStatement :: Parser SynsetRelation
+synsetRelationStatement :: Parser ImplicitSynsetRelation
 synsetRelationStatement = L.nonIndented spaceConsumer go
   where
-    go = SynsetRelation <$> relationName <*> wordSenseIdentifier
+    go = ImplicitSynsetRelation <$> relationName <*> wordSenseIdentifier
     relationName = T.stripEnd
       -- [ ] handle this better
       <$> takeWhile1P (Just "Synset relation name") (`notElem` [':', ' ', '\n'])
       <* symbol ":"
 
-wordSenseStatement :: Parser WNWord
+wordSenseStatement :: Parser ImplicitWNWord
 wordSenseStatement = statement "w" go
   where
-    go = WNWord <$> wordSenseIdentifier <*> wordSenseFrames <*> wordSensePointers
+    go = ImplicitWNWord <$> wordSenseIdentifier <*> wordSenseFrames <*> wordSensePointers
 
 wordSenseIdentifier :: Parser (Maybe Text, Text, Int)
 wordSenseIdentifier = (,,) <$>
@@ -155,10 +155,10 @@ wordSenseIdentifier = (,,) <$>
 -- >>> parseTest wordSense "artifact 2"
 -- ("artifact",2)
 
-wordSensePointers :: Parser [WordPointer]
+wordSensePointers :: Parser [ImplicitWordPointer]
 wordSensePointers = many go
   where
-    go = WordRelation <$> (word <?> "Word pointer") <*> wordSenseIdentifier
+    go = ImplicitWordPointer <$> (word <?> "Word pointer") <*> wordSenseIdentifier
 
 wordSenseFrames :: Parser [Int]
 wordSenseFrames = option [] $ symbol "frames" *> frameNumbers

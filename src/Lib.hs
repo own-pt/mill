@@ -11,7 +11,7 @@ import Data.Functor(($>))
 --import System.FilePath
 
 
-parseLexicographerFile :: FilePath -> IO [Synset]
+parseLexicographerFile :: FilePath -> IO [SynsetToValidate]
 parseLexicographerFile fileName =
   do
     content <- TIO.readFile fileName
