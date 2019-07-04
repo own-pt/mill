@@ -6,7 +6,7 @@ module Process where
 
 --import Control.Monad
 --import Data.Char
-import Data.List
+import Data.List hiding (insert)
 import Data.List.NonEmpty(NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
 --import Data.Traversable
@@ -15,8 +15,6 @@ import qualified Data.Text as T
 import Data.GenericTrie
 
 import Parse hiding (synset,synsets,lexicalIdentifier,wordSensePointers)
-
-
 
 
 data Synset = Synset
@@ -69,7 +67,8 @@ instance Semigroup e => Applicative (Validation e) where
   Failure e <*> Success _  = Failure e
   Failure e <*> Failure e' = Failure (e <> e')
 
-data WNError = MissingSynsetRelationTarget SynsetRelation
+data WNError
+  = MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
   | UnsortedSynsetWordSenses (NonEmpty Text)
   deriving (Eq,Show)
@@ -99,7 +98,7 @@ checkSynsetRelationsTargets index = traverse checkSynsetRelation
       then Success synsetRelation
       else Failure [MissingSynsetRelationTarget synsetRelation] -- []
       where
-        targetSenseKey = senseKey wordForm lexFileId lexicalId
+        targetSenseKey = senseKey lexFileId wordForm lexicalId
 
 checkWordSenses :: Index a -> NonEmpty WNWord -> Validation [WNError] (NonEmpty WNWord)
 checkWordSenses index wordSenses =
@@ -118,7 +117,7 @@ checkWordSensesPointerTargets index = traverse checkWordPointer
       then Success wordPointer
       else Failure [MissingWordRelationTarget wordPointer] -- []
       where
-        targetSenseKey = senseKey wordForm lexFileId lexicalId
+        targetSenseKey = senseKey lexFileId wordForm lexicalId
 
 checkWordSensesOrder :: NonEmpty WNWord -> Validation [WNError] (NonEmpty WNWord)
 checkWordSensesOrder wordSenses =
@@ -131,3 +130,11 @@ checkWordSensesOrder wordSenses =
 
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
+
+validateSynsets :: Index SynsetToValidate -> Validation [WNError] (Index Synset)
+-- [ ] not validating if there are two things with the same reference
+validateSynsets index = foldWithKey go (Success empty) index
+  where
+    go key (Left headWordKey) result = insert key (Left headWordKey) <$> result
+    go key (Right synset) result = insert key . Right <$> checkSynset' synset <*> result
+    checkSynset' = checkSynset index

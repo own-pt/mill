@@ -17,6 +17,8 @@ import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 
 ---
+newtype LexicographerFileId = LexicographerFileId Text deriving (Show,Eq,Ord)
+
 type WordSenseIdentifier = ( Text -- ^ Lexicographer file identifier
                            , Text -- ^ Word form
                            , Int  -- ^ Lexical identifier
@@ -88,7 +90,7 @@ synset = SynsetToValidate
   <*> wordSenseStatement `NC.endBy1` linebreak
   <*> definitionStatement <* linebreak
   <*> exampleStatement `endBy` linebreak
-  <*> framesStatement <* linebreak
+  <*> option [] (framesStatement <* linebreak)
   <*> synsetRelationStatement `NC.endBy1` linebreak
 
 spaceConsumer :: Parser ()
