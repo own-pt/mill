@@ -6,7 +6,6 @@ module Process where
 
 --import Control.Monad
 --import Data.Char
-import Data.Maybe
 import Data.List
 --import Data.Traversable
 import Data.Text (Text)
@@ -15,19 +14,6 @@ import Data.GenericTrie
 
 import Parse hiding (synset,synsets,lexicalIdentifier,wordSensePointers)
 
-type WordSenseIdentifier = ( Text -- ^ Lexicographer file identifier
-                           , Text -- ^ Word form
-                           , Int  -- ^ Lexical identifier
-                           )
-
-type SynsetIdentifier = WordSenseIdentifier
-
-data WordPointer = WordPointer PointerName WordSenseIdentifier
-  deriving (Show,Eq)
-data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
-  deriving (Show,Eq)
-data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
-  deriving (Show,Eq)
 
 data SynsetToValidate = SynsetToValidate
   { lexicographerFileId  :: Text
@@ -59,7 +45,7 @@ processLexicographerFile (lexicographerFileName, _, synsetsComponents) =
     toSynset :: SynsetToValidate -> [SynsetStatement] -> SynsetToValidate
     toSynset synset [] = synset
     toSynset synset@SynsetToValidate{wordSenses} (WordSenseStatement wnWord : remainingStatements) =
-      toSynset (synset {wordSenses = explicitWNWord lexicographerFileName wnWord : wordSenses}) remainingStatements
+      toSynset (synset {wordSenses = wnWord : wordSenses}) remainingStatements
     toSynset synset@SynsetToValidate{relations} (SynsetRelationStatement relation : remainingStatements) =
       toSynset (synset {relations = relation : relations}) remainingStatements
     toSynset synset (DefinitionStatement definition : remainingStatements) =
@@ -71,43 +57,29 @@ processLexicographerFile (lexicographerFileName, _, synsetsComponents) =
       -- only one frames statement is allowed, and this has already been checked (TODO)
       toSynset (synset {frames = frames}) remainingStatements
 
-explicitWordSenseIdentifier :: Text -> ImplicitWordSenseIdentifier -> WordSenseIdentifier
-explicitWordSenseIdentifier defaultLexicographerId (maybeLexicographerId, wordForm, lexicalId) =
-  (fromMaybe defaultLexicographerId maybeLexicographerId, wordForm, lexicalId)
-
-explicitWNWord :: Text -> ImplicitWNWord -> WNWord
-explicitWNWord defaultLexicographerId (ImplicitWNWord implicitWordSenseIdentifier frameIds wordPointers) =
-  WNWord (explicitWordSenseId implicitWordSenseIdentifier)
-    frameIds $ map explicitWordPointer wordPointers
-  where
-    explicitWordSenseId = explicitWordSenseIdentifier defaultLexicographerId
-    explicitWordPointer (ImplicitWordPointer pointerName implicitWordSenseIdentifier) =
-      WordPointer pointerName
-        $ explicitWordSenseId implicitWordSenseIdentifier
-
-explicitSynsetRelation :: Text -> 
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
 
-type Index = Trie String (Either Text SynsetToValidate)
+type Index a = Trie String (Either String a) -- Left is a reference to another key
 
-makeIndex :: [SynsetToValidate] -> Index
+makeIndex :: [SynsetToValidate] -> Index SynsetToValidate
 makeIndex synsets = fromList keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
-    synsetPairs synset@SynsetToValidate{lexicographerFileId, wordSenses} =
-      map (go synset lexicographerFileId) wordSenses
-    go synset lexicographerFileId (WNWord (_, wordForm, lexicalIdentifier) _ _) =
-      (senseKey wordForm lexicographerFileId lexicalIdentifier
-      , Right synset) -- [ ] will using left in all other wordSenses save space?
+    synsetPairs synset@SynsetToValidate{wordSenses = (headWordSense:wordSenses)} = -- the fact that this is non-empty can be checked during parsing
+      let headSenseKey = wordSenseKey headWordSense
+      in
+        (headSenseKey, Right synset) : map (\wordSense -> (wordSenseKey wordSense, Left headSenseKey)) wordSenses
 
-senseKey :: Text --Int -> Int
-  -> Text
-  -> Int -> String
--- [ ] this is wrong
-senseKey lemma lexicographerFileName lexicalIdentifier =
-  intercalate ":" [T.unpack lemma, T.unpack lexicographerFileName, show lexicalIdentifier]      
+wordSenseKey :: WNWord -> String
+wordSenseKey (WNWord (lexicographerFileId, wordForm, lexicalId) _ _) =
+  senseKey lexicographerFileId wordForm lexicalId
+
+senseKey :: Text -> Text -> Int -> String
+-- [ ] this is not really a sense key
+senseKey lexicographerFileId wordForm lexicalId =
+  intercalate "\t" [T.unpack wordForm, T.unpack lexicographerFileId, show lexicalId]
 
 ---- validation
 data Validation e a = Failure e | Success a deriving (Show,Eq)
@@ -131,7 +103,7 @@ data WNError = MissingSynsetRelationTarget SynsetRelation
   deriving (Eq,Show)
   -- [] how to include source info?
 
-checkSynset :: Index -> SynsetToValidate -> Validation [WNError] Synset
+checkSynset :: Index a -> SynsetToValidate -> Validation [WNError] Synset
 checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
   Synset <$>
   Success lexicographerFileId <*>
@@ -146,34 +118,34 @@ checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, d
 --- https://www.reddit.com/r/haskell/comments/7hqodd/pure_functional_validation/
 
 -- [] also check order
-checkSynsetRelationsTargets :: Index -> [SynsetRelation] -> Validation [WNError] [SynsetRelation]
+checkSynsetRelationsTargets :: Index a -> [SynsetRelation] -> Validation [WNError] [SynsetRelation]
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
-    checkSynsetRelation synsetRelation@(SynsetRelation _ (maybeLexFileName, wordForm, lexicalId)) =
-      if member wordSenseKey index
+    checkSynsetRelation synsetRelation@(SynsetRelation _ (lexFileId, wordForm, lexicalId)) =
+      if member targetSenseKey index
       then Success synsetRelation
       else Failure [MissingSynsetRelationTarget synsetRelation] -- []
       where
-        wordSenseKey = senseKey wordForm (fromJust maybeLexFileName) lexicalId
+        targetSenseKey = senseKey wordForm lexFileId lexicalId
 
-checkWordSenses :: Index -> [WNWord] -> Validation [WNError] [WNWord]
+checkWordSenses :: Index a -> [WNWord] -> Validation [WNError] [WNWord]
 checkWordSenses index wordSenses =
   checkWordSensesOrder wordSenses <* checkWordSensesPointerTargets index wordSensePointers
   where
-    wordSensePointers = concatMap (\(WNWord _ _ wordPointers) -> wordPointers) wordSenses 
+    wordSensePointers = concatMap (\(WNWord _ _ wordPointers) -> wordPointers) wordSenses
 
 
-checkWordSensesPointerTargets :: Index -> [WordPointer]
+checkWordSensesPointerTargets :: Index a -> [WordPointer]
   -> Validation [WNError] [WordPointer]
 checkWordSensesPointerTargets index = traverse checkWordPointer
   where
-    checkWordPointer wordPointer@(WordPointer _ (maybeLexFileName, wordForm, lexicalId)) =
+    checkWordPointer wordPointer@(WordPointer _ (lexFileId, wordForm, lexicalId)) =
       -- check pointer name too
-      if member wordSenseKey index
+      if member targetSenseKey index
       then Success wordPointer
       else Failure [MissingWordRelationTarget wordPointer] -- []
       where
-        wordSenseKey = senseKey wordForm (fromJust maybeLexFileName) lexicalId
+        targetSenseKey = senseKey wordForm lexFileId lexicalId
 
 checkWordSensesOrder :: [WNWord] -> Validation [WNError] [WNWord]
 checkWordSensesOrder wordSenses =
@@ -182,7 +154,7 @@ checkWordSensesOrder wordSenses =
   else Success wordSenses
   where
     sortedWordForms = sort wordForms
-    wordForms = map (\(WNWord (_, wordForm,_) _ _) -> wordForm) wordSenses
+    wordForms = map (\(WNWord (_, wordForm, _) _ _) -> wordForm) wordSenses
 
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/

@@ -4,7 +4,7 @@
 module Parse where
 
 import Control.Applicative hiding (some,many)
-import Control.Monad
+import Control.Monad.State.Strict
 import Data.Char
 import Data.Either
 import Data.Bifunctor (bimap)
@@ -17,37 +17,42 @@ import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 
 ---
----
-
-
-type ImplicitWordSenseIdentifier = (Maybe Text, Text, Int)
-type ImplicitSynsetIdentifier = ImplicitWordSenseIdentifier
+type WordSenseIdentifier = ( Text -- ^ Lexicographer file identifier
+                           , Text -- ^ Word form
+                           , Int  -- ^ Lexical identifier
+                           )
+type SynsetIdentifier = WordSenseIdentifier
 type PointerName = Text
 type RelationName = Text
-data ImplicitWordPointer = ImplicitWordPointer PointerName ImplicitWordSenseIdentifier
+data WordPointer = WordPointer PointerName WordSenseIdentifier
   deriving (Show,Eq)
-data ImplicitSynsetRelation = ImplicitSynsetRelation RelationName ImplicitSynsetIdentifier
+data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
   deriving (Show,Eq)
 type FrameIdentifier = Int
-data ImplicitWNWord = ImplicitWNWord ImplicitWordSenseIdentifier [FrameIdentifier] [ImplicitWordPointer]
+data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
   deriving (Show,Eq)
 
-type Parser = Parsec Void Text
 data SynsetStatement
-  = WordSenseStatement ImplicitWNWord
+  = WordSenseStatement WNWord
   | DefinitionStatement Text
   | ExampleStatement Text
   | FramesStatement [Int]
-  | SynsetRelationStatement ImplicitSynsetRelation
+  | SynsetRelationStatement SynsetRelation
   deriving (Show,Eq)
 
 type RawSynsetStatement = Either (ParseError Text Void) SynsetStatement
 type RawSynset = (Int, [RawSynsetStatement])
+---
+
+
+-- State stores in which lexicographer file we're in, this is useful
+-- to fill in implicit references
+type Parser = ParsecT Void Text (State Text)
 
 parseLexicographer :: String -> Text
   -> Either String (Text, Int, [(Int, [SynsetStatement])])
 parseLexicographer fileName inputText =
-  case parse lexicographerFile fileName inputText of
+  case evalState (runParserT lexicographerFile fileName inputText) "all.all" of
     Right (lexicographerFileName, lexicographerIdentifier, rawSynsets)
       -> let (parseErrors, synsetStatementsWithOffsets) = partitionEithers $ map findParseErrors rawSynsets
          in if null parseErrors
@@ -68,10 +73,15 @@ parseLexicographer fileName inputText =
 
 
 lexicographerFile :: Parser (Text, Int, [RawSynset])
-lexicographerFile = (,,) <$>
-  (spaceConsumer *> (word <?> "Lexicographer file name")) <*>
-  (integer <?> "Lexicographer file identifier") <* linebreaks <*>
-  (synsets <* eof)
+lexicographerFile = do
+  _ <- spaceConsumer
+  lexicographerFileName <- word <?> "Lexicographer file name"
+  lexicographerFileNumber <- integer <?> "Lexicographer file identifier"
+  put lexicographerFileName
+  _ <- linebreaks
+  synsetsStatements <- synsets
+  _ <- eof
+  return (lexicographerFileName, lexicographerFileNumber, synsetsStatements)
 
 synsets :: Parser [RawSynset]
 synsets = synset `sepEndBy1` many linebreak
@@ -122,23 +132,23 @@ definitionStatement = statement "d" textBlock
 exampleStatement :: Parser Text
 exampleStatement = statement "e" textBlock
 
-synsetRelationStatement :: Parser ImplicitSynsetRelation
+synsetRelationStatement :: Parser SynsetRelation
 synsetRelationStatement = L.nonIndented spaceConsumer go
   where
-    go = ImplicitSynsetRelation <$> relationName <*> wordSenseIdentifier
+    go = SynsetRelation <$> relationName <*> wordSenseIdentifier
     relationName = T.stripEnd
       -- [ ] handle this better
       <$> takeWhile1P (Just "Synset relation name") (`notElem` [':', ' ', '\n'])
       <* symbol ":"
 
-wordSenseStatement :: Parser ImplicitWNWord
+wordSenseStatement :: Parser WNWord
 wordSenseStatement = statement "w" go
   where
-    go = ImplicitWNWord <$> wordSenseIdentifier <*> wordSenseFrames <*> wordSensePointers
+    go = WNWord <$> wordSenseIdentifier <*> wordSenseFrames <*> wordSensePointers
 
-wordSenseIdentifier :: Parser (Maybe Text, Text, Int)
+wordSenseIdentifier :: Parser (Text, Text, Int)
 wordSenseIdentifier = (,,) <$>
-  optional lexicographerIdentifier <*> word <*> lexicalIdentifier
+  (lexicographerIdentifier <|> get) <*> word <*> lexicalIdentifier
   where
     lexicographerFilePos :: Parser Text
     lexicographerFilePos = choice $
@@ -155,10 +165,10 @@ wordSenseIdentifier = (,,) <$>
 -- >>> parseTest wordSense "artifact 2"
 -- ("artifact",2)
 
-wordSensePointers :: Parser [ImplicitWordPointer]
+wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
   where
-    go = ImplicitWordPointer <$> (word <?> "Word pointer") <*> wordSenseIdentifier
+    go = WordPointer <$> (word <?> "Word pointer") <*> wordSenseIdentifier
 
 wordSenseFrames :: Parser [Int]
 wordSenseFrames = option [] $ symbol "frames" *> frameNumbers
