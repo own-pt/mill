@@ -18,7 +18,7 @@ import Parse hiding (synset,synsets,lexicalIdentifier,wordSensePointers)
 
 
 data Synset = Synset
-  { sourcePosition       :: Int
+  { sourcePosition       :: SourcePosition
   , lexicographerFileId  :: LexicographerFileId
   , wordSenses           :: NonEmpty WNWord
   , definition           :: Text
@@ -71,18 +71,24 @@ data WNError
   = MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
   | UnsortedSynsetWordSenses (NonEmpty WordSenseForm)
-  deriving (Eq,Show)
-  -- [] how to include source info?
+  deriving (Show)
 
-checkSynset :: Index a -> SynsetToValidate -> Validation [WNError] Synset
-checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} = Synset
-  <$> Success sourcePosition
-  <*> Success lexicographerFileId
-  <*> checkWordSenses index wordSenses
-  <*> Success definition
-  <*> Success examples
-  <*> Success frames -- [ ] check frames
-  <*> checkSynsetRelationsTargets index relations
+data SourceError = SourceError SourcePosition WNError deriving (Show)
+
+checkSynset :: Index a -> SynsetToValidate -> Validation [SourceError] Synset
+checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
+  case result of
+    Success synset -> Success synset
+    Failure errors -> Failure $ map (SourceError sourcePosition) errors
+  where
+    result = Synset
+      <$> Success sourcePosition
+      <*> Success lexicographerFileId
+      <*> checkWordSenses index wordSenses
+      <*> Success definition
+      <*> Success examples
+      <*> Success frames -- [ ] check frames
+      <*> checkSynsetRelationsTargets index relations
 
 
 --- use <*> for validation, or <*? see
@@ -131,7 +137,7 @@ checkWordSensesOrder wordSenses =
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
-validateSynsets :: Index SynsetToValidate -> Validation [WNError] (Index Synset)
+validateSynsets :: Index SynsetToValidate -> Validation [SourceError] (Index Synset)
 -- [ ] not validating if there are two things with the same reference
 validateSynsets index = foldWithKey go (Success empty) index
   where

@@ -37,10 +37,10 @@ type FrameIdentifier = Int
 data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
   deriving (Show,Eq)
 
-type RawSynset = Either (ParseError Text Void) SynsetToValidate
+newtype SourcePosition = SourcePosition Int deriving (Show,Eq,Ord)
 
 data SynsetToValidate = SynsetToValidate
-  { sourcePosition       :: Int
+  { sourcePosition       :: SourcePosition
   , lexicographerFileId  :: LexicographerFileId
   , wordSenses           :: NonEmpty WNWord
   , definition           :: Text
@@ -48,6 +48,8 @@ data SynsetToValidate = SynsetToValidate
   , frames               :: [Int]
   , relations            :: NonEmpty SynsetRelation
   } deriving (Show,Eq)
+
+type RawSynset = Either (ParseError Text Void) SynsetToValidate
 ---
 
 
@@ -87,7 +89,7 @@ synsets = synsetOrError `sepEndBy1` many linebreak
 
 synset :: Parser SynsetToValidate
 synset = SynsetToValidate
-  <$> getOffset
+  <$> fmap SourcePosition getOffset
   <*> get
   <*> wordSenseStatement `NC.endBy1` linebreak
   <*> definitionStatement <* linebreak
