@@ -18,10 +18,12 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 ---
 newtype LexicographerFileId = LexicographerFileId Text deriving (Show,Eq,Ord)
+newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord)
+newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord)
 
-type WordSenseIdentifier = ( Text -- ^ Lexicographer file identifier
-                           , Text -- ^ Word form
-                           , Int  -- ^ Lexical identifier
+type WordSenseIdentifier = ( LexicographerFileId -- ^ Lexicographer file identifier
+                           , WordSenseForm -- ^ Word form
+                           , LexicalId  -- ^ Lexical identifier
                            )
 
 type SynsetIdentifier = WordSenseIdentifier
@@ -39,7 +41,7 @@ type RawSynset = Either (ParseError Text Void) SynsetToValidate
 
 data SynsetToValidate = SynsetToValidate
   { sourcePosition       :: Int
-  , lexicographerFileId  :: Text
+  , lexicographerFileId  :: LexicographerFileId
   , wordSenses           :: NonEmpty WNWord
   , definition           :: Text
   , examples             :: [Text]
@@ -51,12 +53,12 @@ data SynsetToValidate = SynsetToValidate
 
 -- State stores in which lexicographer file we're in, this is useful
 -- to fill in implicit references
-type Parser = ParsecT Void Text (State Text)
+type Parser = ParsecT Void Text (State LexicographerFileId)
 
 parseLexicographer :: String -> Text
-  -> Either String (Text, Int, [SynsetToValidate])
+  -> Either String (LexicographerFileId, Int, [SynsetToValidate])
 parseLexicographer fileName inputText =
-  case evalState (runParserT lexicographerFile fileName inputText) "all.all" of
+  case evalState (runParserT lexicographerFile fileName inputText) (LexicographerFileId "all.all") of
     Right (lexicographerFileName, lexicographerIdentifier, rawSynsets)
       -> case partitionEithers rawSynsets of
            ([], synsetsToValidate) ->
@@ -65,10 +67,10 @@ parseLexicographer fileName inputText =
     Left errors -> Left $ errorBundlePretty errors
 
 
-lexicographerFile :: Parser (Text, Int, [RawSynset])
+lexicographerFile :: Parser (LexicographerFileId, Int, [RawSynset])
 lexicographerFile = do
   _ <- spaceConsumer
-  lexicographerFileName <- word <?> "Lexicographer file name"
+  lexicographerFileName <- LexicographerFileId <$> word <?> "Lexicographer file name"
   lexicographerFileNumber <- integer <?> "Lexicographer file identifier"
   put lexicographerFileName
   _ <- linebreaks
@@ -136,21 +138,21 @@ wordSenseStatement = statement "w" go
   where
     go = WNWord <$> wordSenseIdentifier <*> wordSenseFrames <*> wordSensePointers
 
-wordSenseIdentifier :: Parser (Text, Text, Int)
+wordSenseIdentifier :: Parser WordSenseIdentifier
 wordSenseIdentifier = (,,) <$>
-  (lexicographerIdentifier <|> get) <*> word <*> lexicalIdentifier
+  (lexicographerIdentifier <|> get) <*> fmap WordSenseForm word <*> lexicalIdentifier
   where
     lexicographerFilePos :: Parser Text
     lexicographerFilePos = choice $
       map string ["noun", "verb", "adjs", "adj", "adv"]
     lexicographerFileName = takeWhile1P Nothing (/= ':')
-    lexicographerIdentifier :: Parser Text
+    lexicographerIdentifier :: Parser LexicographerFileId
     lexicographerIdentifier = do
       pos <- lexicographerFilePos
       _ <- string "."
       fileName <- lexicographerFileName
       _ <- string ":"
-      return $ T.concat [pos,".",fileName]
+      return $ LexicographerFileId $ T.concat [pos,".",fileName]
 
 -- >>> parseTest wordSense "artifact 2"
 -- ("artifact",2)
@@ -166,8 +168,8 @@ wordSenseFrames = option [] $ symbol "frames" *> frameNumbers
 word :: Parser Text
 word = lexeme $ takeWhile1P Nothing (not . isSpace)
 
-lexicalIdentifier :: Parser Int
-lexicalIdentifier = option 0 (integer <?> "Lexical Identifier")
+lexicalIdentifier :: Parser LexicalId
+lexicalIdentifier = LexicalId <$> option 0 (integer <?> "Lexical Identifier")
 
 framesStatement :: Parser [Int]
 framesStatement = statement "fs" frameNumbers

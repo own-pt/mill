@@ -19,7 +19,7 @@ import Parse hiding (synset,synsets,lexicalIdentifier,wordSensePointers)
 
 data Synset = Synset
   { sourcePosition       :: Int
-  , lexicographerFileId  :: Text
+  , lexicographerFileId  :: LexicographerFileId
   , wordSenses           :: NonEmpty WNWord
   , definition           :: Text
   , examples             :: [Text]
@@ -46,9 +46,9 @@ wordSenseKey :: WNWord -> String
 wordSenseKey (WNWord (lexicographerFileId, wordForm, lexicalId) _ _) =
   senseKey lexicographerFileId wordForm lexicalId
 
-senseKey :: Text -> Text -> Int -> String
+senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 -- [ ] this is not really a sense key
-senseKey lexicographerFileId wordForm lexicalId =
+senseKey  (LexicographerFileId lexicographerFileId) (WordSenseForm wordForm) lexicalId =
   intercalate "\t" [T.unpack wordForm, T.unpack lexicographerFileId, show lexicalId]
 
 ---- validation
@@ -70,7 +70,7 @@ instance Semigroup e => Applicative (Validation e) where
 data WNError
   = MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
-  | UnsortedSynsetWordSenses (NonEmpty Text)
+  | UnsortedSynsetWordSenses (NonEmpty WordSenseForm)
   deriving (Eq,Show)
   -- [] how to include source info?
 
