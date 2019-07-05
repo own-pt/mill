@@ -67,6 +67,10 @@ instance Semigroup e => Applicative (Validation e) where
   Failure e <*> Success _  = Failure e
   Failure e <*> Failure e' = Failure (e <> e')
 
+validation :: (e -> b) -> (a -> b) -> Validation e a -> b
+validation f _ (Failure e) = f e
+validation _ g (Success a) = g a
+
 data WNError
   = MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
@@ -137,10 +141,16 @@ checkWordSensesOrder wordSenses =
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
-validateSynsets :: Index SynsetToValidate -> Validation [SourceError] (Index Synset)
+validateSynsetsInIndex :: Index SynsetToValidate -> Validation [SourceError] (Index Synset)
 -- [ ] not validating if there are two things with the same reference
-validateSynsets index = foldWithKey go (Success empty) index
+validateSynsetsInIndex index = foldWithKey go (Success empty) index
   where
     go key (Left headWordKey) result = insert key (Left headWordKey) <$> result
     go key (Right synset) result = insert key . Right <$> checkSynset' synset <*> result
+    checkSynset' = checkSynset index
+
+validateSynsets :: Index SynsetToValidate -> [SynsetToValidate] -> Validation [SourceError] [Synset]
+validateSynsets index = foldr go (Success [])
+  where
+    go synset result = (:) <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
