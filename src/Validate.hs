@@ -2,7 +2,7 @@
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 
-module Process where
+module Validate where
 
 --import Control.Monad
 --import Data.Char
@@ -79,6 +79,21 @@ data WNError
 
 data SourceError = SourceError SourcePosition WNError deriving (Show)
 
+showSourceError :: SourceError -> Text
+-- use http://hackage.haskell.org/package/formatting-6.3.7/docs/Formatting.html ?
+showSourceError (SourceError (SourcePosition pos) wnError) =
+  T.concat ["[", T.pack $ show pos, "] ", showWNError wnError]
+  where
+    showWNError (MissingSynsetRelationTarget
+                 (SynsetRelation relationName wordSenseId)) =
+      T.concat ["Missing ", relationName, " relation target ", showWordSenseId wordSenseId ]
+    showWNError (MissingWordRelationTarget
+                 (WordPointer pointerName wordSenseId)) = T.concat ["Missing ", pointerName, " word relation target ", showWordSenseId wordSenseId]
+    showWNError (UnsortedSynsetWordSenses sortedWordSenseForms) = T.concat ["Unsorted list of word senses; order should be ", showWordSenseForms sortedWordSenseForms]
+    showWordSenseForms = T.intercalate ", " . NE.toList . NE.map (\(WordSenseForm wordSenseForm) -> wordSenseForm)
+    showWordSenseId (LexicographerFileId lexicographerFileId, WordSenseForm wordForm, LexicalId lexicalId) =
+      T.concat [wordForm, ":", T.pack . show $ lexicalId, " at file ", lexicographerFileId]
+
 checkSynset :: Index a -> SynsetToValidate -> Validation [SourceError] Synset
 checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
   case result of
@@ -154,3 +169,6 @@ validateSynsets index = foldr go (Success [])
   where
     go synset result = (:) <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
+
+---
+

@@ -5,14 +5,14 @@ module Lib
     ) where
 
 import Parse hiding (synsets)
-import Process
+import Validate
 
 import Data.Either
-import Data.GenericTrie
+--import Data.GenericTrie
 --import Data.Text (Text)
 --import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Functor(($>))
+import Data.Functor(($>),void)
 --import System.FilePath
 
 
@@ -34,12 +34,12 @@ parseLexicographerFiles fileNames = do
       in return $ validateSynsetsInIndex index
     _ -> return (Failure [])
 
-validateLexicographerFile :: FilePath -> [FilePath] -> IO [SourceError]
+validateLexicographerFile :: FilePath -> [FilePath] -> IO ()
 validateLexicographerFile fileToValidate otherFiles = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
   case partitionEithers lexFilesSynsetsOrErrors of
     ([], lexFilesSynsets@(synsetsToValidate:_)) ->
       let synsets = concat lexFilesSynsets
           index   = makeIndex synsets
-      in return $ validation id (const []) $ validateSynsets index synsetsToValidate
-    _ -> return []
+      in validation (mapM_ (TIO.putStrLn . showSourceError)) (void . return) $ validateSynsets index synsetsToValidate
+    _ -> return ()
