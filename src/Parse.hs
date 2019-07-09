@@ -181,7 +181,7 @@ framesStatement = statement "fs" frameNumbers
 
 frameNumbers :: Parser [Int]
 frameNumbers = some (integer <?> "Frame number")
--- >>> parseTest framesStatement "frame: 2 3"
+-- >>> parseTest framesStatement "fs: 2 3"
 -- [2,3]
 
 whiteSpaceConsumer :: Parser ()
