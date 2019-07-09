@@ -16,7 +16,7 @@ import Data.Functor(($>),void)
 --import System.FilePath
 
 
-parseLexicographerFile :: FilePath -> IO (Either () [SynsetToValidate])
+parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
 parseLexicographerFile fileName = do
   content <- TIO.readFile fileName
   case parseLexicographer fileName content of
@@ -24,7 +24,7 @@ parseLexicographerFile fileName = do
     Right (_, _, lexFileSynsets) -> 
       return $ Right lexFileSynsets
 
-parseLexicographerFiles :: [FilePath] -> IO (Validation [SourceError] (Index Synset))
+parseLexicographerFiles :: [FilePath] -> IO (Validation [SourceError] (Index (Synset Validated)))
 parseLexicographerFiles fileNames = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile fileNames
   case partitionEithers lexFilesSynsetsOrErrors of

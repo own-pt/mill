@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StrictData #-}
 
 module Parse where
 
@@ -39,7 +40,9 @@ data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
 
 newtype SourcePosition = SourcePosition Int deriving (Show,Eq,Ord)
 
-data SynsetToValidate = SynsetToValidate
+data Unvalidated
+
+data Synset a = Synset
   { sourcePosition       :: SourcePosition
   , lexicographerFileId  :: LexicographerFileId
   , wordSenses           :: NonEmpty WNWord
@@ -49,7 +52,7 @@ data SynsetToValidate = SynsetToValidate
   , relations            :: NonEmpty SynsetRelation
   } deriving (Show,Eq)
 
-type RawSynset = Either (ParseError Text Void) SynsetToValidate
+type RawSynset = Either (ParseError Text Void) (Synset Unvalidated)
 ---
 
 
@@ -58,7 +61,7 @@ type RawSynset = Either (ParseError Text Void) SynsetToValidate
 type Parser = ParsecT Void Text (State LexicographerFileId)
 
 parseLexicographer :: String -> Text
-  -> Either String (LexicographerFileId, Int, [SynsetToValidate])
+  -> Either String (LexicographerFileId, Int, [Synset Unvalidated])
 parseLexicographer fileName inputText =
   case evalState (runParserT lexicographerFile fileName inputText) (LexicographerFileId "all.all") of
     Right (lexicographerFileName, lexicographerIdentifier, rawSynsets)
@@ -87,8 +90,8 @@ synsets = synsetOrError `sepEndBy1` many linebreak
     recover :: ParseError Text Void -> Parser RawSynset
     recover err = Left err <$ manyTill anySingle (try $ count 2 linebreak)
 
-synset :: Parser SynsetToValidate
-synset = SynsetToValidate
+synset :: Parser (Synset Unvalidated)
+synset = Synset
   <$> fmap SourcePosition getOffset
   <*> get
   <*> wordSenseStatement `NC.endBy1` linebreak

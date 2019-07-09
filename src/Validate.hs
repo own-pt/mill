@@ -16,28 +16,18 @@ import Data.GenericTrie
 
 import Parse hiding (synset,synsets,lexicalIdentifier,wordSensePointers)
 
-
-data Synset = Synset
-  { sourcePosition       :: SourcePosition
-  , lexicographerFileId  :: LexicographerFileId
-  , wordSenses           :: NonEmpty WNWord
-  , definition           :: Text
-  , examples             :: [Text]
-  , frames               :: [Int]
-  , relations            :: NonEmpty SynsetRelation
-  } deriving (Show,Eq)
-
+data Validated
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
 
 type Index a = Trie String (Either String a) -- Left is a reference to another key
 
-makeIndex :: [SynsetToValidate] -> Index SynsetToValidate
+makeIndex :: [Synset Unvalidated] -> Index (Synset Unvalidated)
 makeIndex synsets = fromList keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
-    synsetPairs synset@SynsetToValidate{wordSenses = (headWordSense:|wordSenses)} = -- the fact that this is non-empty can be checked during parsing
+    synsetPairs synset@Synset{wordSenses = (headWordSense:|wordSenses)} = -- the fact that this is non-empty can be checked during parsing
       let headSenseKey = wordSenseKey headWordSense
       in
         (headSenseKey, Right synset) : map (\wordSense -> (wordSenseKey wordSense, Left headSenseKey)) wordSenses
@@ -94,8 +84,8 @@ showSourceError (SourceError (SourcePosition pos) wnError) =
     showWordSenseId (LexicographerFileId lexicographerFileId, WordSenseForm wordForm, LexicalId lexicalId) =
       T.concat [wordForm, ":", T.pack . show $ lexicalId, " at file ", lexicographerFileId]
 
-checkSynset :: Index a -> SynsetToValidate -> Validation [SourceError] Synset
-checkSynset index SynsetToValidate{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
+checkSynset :: Index a -> Synset Unvalidated -> Validation [SourceError] (Synset Validated)
+checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
   case result of
     Success synset -> Success synset
     Failure errors -> Failure $ map (SourceError sourcePosition) errors
@@ -156,7 +146,7 @@ checkWordSensesOrder wordSenses =
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
-validateSynsetsInIndex :: Index SynsetToValidate -> Validation [SourceError] (Index Synset)
+validateSynsetsInIndex :: Index (Synset Unvalidated) -> Validation [SourceError] (Index (Synset Validated))
 -- [ ] not validating if there are two things with the same reference
 validateSynsetsInIndex index = foldWithKey go (Success empty) index
   where
@@ -164,7 +154,7 @@ validateSynsetsInIndex index = foldWithKey go (Success empty) index
     go key (Right synset) result = insert key . Right <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
 
-validateSynsets :: Index SynsetToValidate -> [SynsetToValidate] -> Validation [SourceError] [Synset]
+validateSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated] -> Validation [SourceError] [Synset Validated]
 validateSynsets index = foldr go (Success [])
   where
     go synset result = (:) <$> checkSynset' synset <*> result
