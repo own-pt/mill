@@ -86,7 +86,6 @@ def print_word_sense(graph, word_sense, lexicographerFile,
                                " {}".format(lexical_id) if lexical_id.neq("0") else "")
         
     def print_word_relations():
-        ## [] sort them
         frames = []
         relations = []
         for predicate, obj in graph.predicate_objects(word_sense):
