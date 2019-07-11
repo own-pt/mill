@@ -1,0 +1,20 @@
+# -*- mode: org -*-
+
+* format
+- order matters (because we also want to print to this format after
+  doing modifications automatically)
+  - words should appear in lexicographical order
+  - relation statements come last, also in lexicographical order
+
+#+BEGIN_EXAMPLE
+w: abandoned_ship
+w: derelict drf derelict 1
+d: a ship abandoned on the high seas
+e: we found an abandoned ship while diving
+hyper: ship
+#+END_EXAMPLE
+
+* RDF -> text
+run =wn2text.py --help=. this directory is the configuration file, and
+you can download the input RDF file from
+https://github.com/own-pt/openWordnet-PT.

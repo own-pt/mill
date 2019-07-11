@@ -1,7 +1,10 @@
+#!/bin/python3
+
 import os
 import rdflib as r
 from rdflib import Graph
 from rdflib import Namespace
+import click
 
 # missing:
 ## - syntactic markers
@@ -9,6 +12,11 @@ from rdflib import Namespace
 
 wn30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
 
+@click.command()
+@click.argument('rdf_file', type=click.Path(exists=True, dir_okay=False, resolve_path=True), required=True)
+@click.argument('config_dir', type=click.Path(exists=True, file_okay=False, resolve_path=True), required=True)
+@click.argument('output_dir', type=click.Path(file_okay=False, resolve_path=True, writable=True), required=True)
+@click.option('-f', '--rdf-file-format', 'rdf_file_format', type=click.STRING, help = "Type of RDF input file. Must be accepted by RDFlib.")
 def main (rdf_file, config_dir, output_dir, rdf_file_format="nt"):
     (synset_relations, word_relations, frames_to_id) = read_config(config_dir)
     graph = Graph()
@@ -150,3 +158,7 @@ def print_word_sense(graph, word_sense, lexicographerFile,
 
     write("w: {}".format(word_sense_id(graph, lexicographerFile, word_sense)), end="")
     print_word_relations()
+
+
+if __name__ == '__main__':
+    main()
