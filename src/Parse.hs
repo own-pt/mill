@@ -3,10 +3,11 @@
 
 module Parse where
 
+import Data
+
 import Control.Applicative hiding (some,many)
 import Control.Monad.State.Strict
 import Data.Char
-import Data.List.NonEmpty(NonEmpty)
 import Data.Either
 import Data.Text (Text)
 import Data.Void (Void)
@@ -17,44 +18,8 @@ import qualified Data.Text as T
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 
----
-newtype LexicographerFileId = LexicographerFileId Text deriving (Show,Eq,Ord)
-newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord)
-newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord)
-
-type WordSenseIdentifier = ( LexicographerFileId -- ^ Lexicographer file identifier
-                           , WordSenseForm -- ^ Word form
-                           , LexicalId  -- ^ Lexical identifier
-                           )
-
-type SynsetIdentifier = WordSenseIdentifier
-type PointerName = Text
-type RelationName = Text
-data WordPointer = WordPointer PointerName WordSenseIdentifier
-  deriving (Show,Eq)
-data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
-  deriving (Show,Eq)
-type FrameIdentifier = Int
-data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
-  deriving (Show,Eq)
-
-newtype SourcePosition = SourcePosition Int deriving (Show,Eq,Ord)
-
-data Unvalidated
-
-data Synset a = Synset
-  { sourcePosition       :: SourcePosition
-  , lexicographerFileId  :: LexicographerFileId
-  , wordSenses           :: NonEmpty WNWord
-  , definition           :: Text
-  , examples             :: [Text]
-  , frames               :: [Int]
-  , relations            :: NonEmpty SynsetRelation
-  } deriving (Show,Eq)
 
 type RawSynset = Either (ParseError Text Void) (Synset Unvalidated)
----
-
 
 -- State stores in which lexicographer file we're in, this is useful
 -- to fill in implicit references
@@ -91,14 +56,16 @@ synsets = synsetOrError `sepEndBy1` many linebreak
     recover err = Left err <$ manyTill anySingle (try $ count 2 linebreak)
 
 synset :: Parser (Synset Unvalidated)
-synset = Synset
-  <$> fmap SourcePosition getOffset
-  <*> get
-  <*> wordSenseStatement `NC.endBy1` linebreak
-  <*> definitionStatement <* linebreak
-  <*> exampleStatement `endBy` linebreak
-  <*> option [] (framesStatement <* linebreak)
-  <*> synsetRelationStatement `NC.endBy1` linebreak
+synset = do
+  startOffset <- getOffset
+  lexicographerId <- get
+  synsetWordSenses <- wordSenseStatement `NC.endBy1` linebreak
+  synsetDefinition <-  definitionStatement <* linebreak
+  synsetExamples <- exampleStatement `endBy` linebreak
+  synsetFrames <- option [] (framesStatement <* linebreak)
+  synsetRelations <- synsetRelationStatement `NC.endBy1` linebreak
+  endOffset <- getOffset
+  return $ Synset (SourcePosition (startOffset, endOffset)) lexicographerId synsetWordSenses synsetDefinition synsetExamples synsetFrames synsetRelations
 
 spaceConsumer :: Parser ()
 -- comments will only be allowed as statements, because we want to
@@ -132,7 +99,7 @@ exampleStatement = statement "e" textBlock
 synsetRelationStatement :: Parser SynsetRelation
 synsetRelationStatement = L.nonIndented spaceConsumer go
   where
-    go = SynsetRelation <$> relationName <*> wordSenseIdentifier
+    go = SynsetRelation <$> relationName <*> (SynsetIdentifier <$> identifier)
     relationName = T.stripEnd
       -- [ ] handle this better
       <$> takeWhile1P (Just "Synset relation name") (`notElem` [':', ' ', '\n'])
@@ -144,7 +111,11 @@ wordSenseStatement = statement "w" go
     go = WNWord <$> wordSenseIdentifier <*> wordSenseFrames <*> wordSensePointers
 
 wordSenseIdentifier :: Parser WordSenseIdentifier
-wordSenseIdentifier = (,,) <$>
+wordSenseIdentifier = WordSenseIdentifier <$> identifier
+
+identifier :: Parser (LexicographerFileId, WordSenseForm, LexicalId)
+identifier =
+  (,,) <$>
   (lexicographerIdentifier <|> get) <*> fmap WordSenseForm word <*> lexicalIdentifier
   where
     lexicographerFilePos :: Parser Text

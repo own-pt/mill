@@ -4,19 +4,14 @@
 
 module Validate where
 
---import Control.Monad
---import Data.Char
+import Data
+
 import Data.List hiding (insert)
 import Data.List.NonEmpty(NonEmpty((:|)))
 import qualified Data.List.NonEmpty as NE
---import Data.Traversable
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.GenericTrie
-
-import Parse hiding (synset,synsets,lexicalIdentifier,wordSensePointers)
-
-data Validated
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
@@ -27,13 +22,13 @@ makeIndex :: [Synset Unvalidated] -> Index (Synset Unvalidated)
 makeIndex synsets = fromList keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
-    synsetPairs synset@Synset{wordSenses = (headWordSense:|wordSenses)} = -- the fact that this is non-empty can be checked during parsing
+    synsetPairs synset@Synset{wordSenses = (headWordSense:|wordSenses)} =
       let headSenseKey = wordSenseKey headWordSense
       in
         (headSenseKey, Right synset) : map (\wordSense -> (wordSenseKey wordSense, Left headSenseKey)) wordSenses
 
 wordSenseKey :: WNWord -> String
-wordSenseKey (WNWord (lexicographerFileId, wordForm, lexicalId) _ _) =
+wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _) =
   senseKey lexicographerFileId wordForm lexicalId
 
 senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
@@ -75,13 +70,15 @@ showSourceError (SourceError (SourcePosition pos) wnError) =
   T.concat ["[", T.pack $ show pos, "] ", showWNError wnError]
   where
     showWNError (MissingSynsetRelationTarget
-                 (SynsetRelation relationName wordSenseId)) =
-      T.concat ["Missing ", relationName, " relation target ", showWordSenseId wordSenseId ]
+                 (SynsetRelation relationName synsetId)) =
+      T.concat ["Missing ", relationName, " relation target ", showSynsetId synsetId]
     showWNError (MissingWordRelationTarget
                  (WordPointer pointerName wordSenseId)) = T.concat ["Missing ", pointerName, " word relation target ", showWordSenseId wordSenseId]
     showWNError (UnsortedSynsetWordSenses sortedWordSenseForms) = T.concat ["Unsorted list of word senses; order should be ", showWordSenseForms sortedWordSenseForms]
     showWordSenseForms = T.intercalate ", " . NE.toList . NE.map (\(WordSenseForm wordSenseForm) -> wordSenseForm)
-    showWordSenseId (LexicographerFileId lexicographerFileId, WordSenseForm wordForm, LexicalId lexicalId) =
+    showWordSenseId (WordSenseIdentifier wordSenseIdentifier) = showIdentifier wordSenseIdentifier
+    showSynsetId (SynsetIdentifier synsetIdentifier) = showIdentifier synsetIdentifier
+    showIdentifier (LexicographerFileId lexicographerFileId, WordSenseForm wordForm, LexicalId lexicalId) =
       T.concat [wordForm, ":", T.pack . show $ lexicalId, " at file ", lexicographerFileId]
 
 checkSynset :: Index a -> Synset Unvalidated -> Validation [SourceError] (Synset Validated)
@@ -108,7 +105,7 @@ checkSynsetRelationsTargets :: Index a -> NonEmpty SynsetRelation
   -> Validation [WNError] (NonEmpty SynsetRelation)
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
-    checkSynsetRelation synsetRelation@(SynsetRelation _ (lexFileId, wordForm, lexicalId)) =
+    checkSynsetRelation synsetRelation@(SynsetRelation _ (SynsetIdentifier (lexFileId, wordForm, lexicalId))) =
       if member targetSenseKey index
       then Success synsetRelation
       else Failure [MissingSynsetRelationTarget synsetRelation] -- []
@@ -126,7 +123,7 @@ checkWordSensesPointerTargets :: Index a -> [WordPointer]
   -> Validation [WNError] [WordPointer]
 checkWordSensesPointerTargets index = traverse checkWordPointer
   where
-    checkWordPointer wordPointer@(WordPointer _ (lexFileId, wordForm, lexicalId)) =
+    checkWordPointer wordPointer@(WordPointer _ (WordSenseIdentifier (lexFileId, wordForm, lexicalId))) =
       -- check pointer name too
       if member targetSenseKey index
       then Success wordPointer
@@ -141,7 +138,7 @@ checkWordSensesOrder wordSenses =
   else Success wordSenses
   where
     sortedWordForms = NE.sort wordForms
-    wordForms = NE.map (\(WNWord (_, wordForm, _) _ _) -> wordForm) wordSenses
+    wordForms = NE.map (\(WNWord (WordSenseIdentifier (_, wordForm, _)) _ _) -> wordForm) wordSenses
 
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/

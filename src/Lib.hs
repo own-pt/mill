@@ -4,7 +4,8 @@ module Lib
     , validateLexicographerFile
     ) where
 
-import Parse (Synset,Unvalidated,parseLexicographer)
+import Data (Synset,Unvalidated,Validated)
+import Parse (parseLexicographer)
 import Validate
 
 import Data.Map.Strict (Map)
