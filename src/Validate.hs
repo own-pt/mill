@@ -143,12 +143,21 @@ checkWordSensesOrder wordSenses =
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
-validateSynsetsInIndex :: Index (Synset Unvalidated) -> Validation [SourceError] (Index (Synset Validated))
+validateIndex :: Index (Synset Unvalidated) -> Validation [SourceError] (Index (Synset Validated))
 -- [ ] not validating if there are two things with the same reference
-validateSynsetsInIndex index = foldWithKey go (Success empty) index
+validateIndex index = foldWithKey go (Success empty) index
   where
     go key (Left headWordKey) result = insert key (Left headWordKey) <$> result
     go key (Right synset) result = insert key . Right <$> checkSynset' synset <*> result
+    checkSynset' = checkSynset index
+
+
+validateSynsetsInIndex :: Index (Synset Unvalidated)
+  -> Validation [SourceError] [Synset Validated]
+validateSynsetsInIndex index = foldWithKey go (Success []) index
+  where
+    go _ (Left _) result = result
+    go _ (Right synset) result = (:) <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
 
 validateSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated] -> Validation [SourceError] [Synset Validated]

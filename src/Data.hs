@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Data where
 
@@ -81,23 +82,28 @@ wordSenseIdentifierToIRI (WordSenseIdentifier wnIdentifier) = wnIdentifierToIRI 
 synsetIdentifierToIRI :: SynsetIdentifier -> RDFGen IRI
 synsetIdentifierToIRI (SynsetIdentifier wnIdentifier) = wnIdentifierToIRI "synset" wnIdentifier
 
-
-
 synsetToTriples :: Synset Validated -> RDFGen Triples
-synsetToTriples Synset{lexicographerFileId, wordSenses, definition} = do
+synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, frames} = do
   lexicographerFileLiteral <- object lexicographerFileId
-  synsetIri <- synsetIriGen
-  lexicographerFilePredicate <- appBaseIRI $ Endo (\baseIri -> baseIri {iriPath = "inLexicographerFile"})
-  definitionPredicate <- appBaseIRI $ Endo (\baseIri -> baseIri {iriPath = "definition"})
+  synsetIri <- fmap IRISubject synsetIriGen
+  lexicographerFilePredicate <- makePredicate "lexicographerFile"
+  definitionPredicate <- makePredicate "definition"
   definitionLiteral <- object definition
-  return $ DL.fromList
-    [ Triple (IRISubject synsetIri) (Predicate lexicographerFilePredicate) lexicographerFileLiteral
-    , Triple (IRISubject synsetIri) (Predicate definitionPredicate) definitionLiteral]
+  examplePredicate <- makePredicate "example"
+  exampleLiterals <- mapM object examples
+  framePredicate <- makePredicate "frame"
+  frameLiterals <- mapM object frames
+  return $ DL.fromList $
+    [ Triple synsetIri lexicographerFilePredicate lexicographerFileLiteral
+    , Triple synsetIri definitionPredicate definitionLiteral ]
+    ++ map (Triple synsetIri examplePredicate) exampleLiterals
+    ++ map (Triple synsetIri framePredicate) frameLiterals
   where
+    makePredicate path = fmap Predicate . appBaseIRI $ Endo (\baseIri -> baseIri {iriPath = path})
     synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
     headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier) $ NE.head wordSenses
 
--- instance ToRDF (Synset a) where
---   triples = pure . _
+instance ToRDF (Synset Validated) where
+   triples = synsetToTriples
 
 
