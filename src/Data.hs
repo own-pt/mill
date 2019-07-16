@@ -91,14 +91,18 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, fr
   definitionLiteral <- object definition
   examplePredicate <- makePredicate "example"
   exampleLiterals <- mapM object examples
+  containsWordSensePredicate <- makePredicate "containsWordSense"
+  wordSenseObjs <- fmap (map IRIObject) . mapM wordSenseIri $ NE.toList wordSenses
   framePredicate <- makePredicate "frame"
   frameLiterals <- mapM object frames
-  return $ DL.fromList $
+  return . DL.concat . map DL.fromList $ [
     [ Triple synsetIri lexicographerFilePredicate lexicographerFileLiteral
     , Triple synsetIri definitionPredicate definitionLiteral ]
-    ++ map (Triple synsetIri examplePredicate) exampleLiterals
-    ++ map (Triple synsetIri framePredicate) frameLiterals
+    , map (Triple synsetIri examplePredicate) exampleLiterals
+    , map (Triple synsetIri containsWordSensePredicate) wordSenseObjs
+    , map (Triple synsetIri framePredicate) frameLiterals ]
   where
+    wordSenseIri (WNWord wordSenseId _ _) = wordSenseIdentifierToIRI wordSenseId
     makePredicate path = fmap Predicate . appBaseIRI $ Endo (\baseIri -> baseIri {iriPath = path})
     synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
     headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier) $ NE.head wordSenses
