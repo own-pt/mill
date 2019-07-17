@@ -39,12 +39,13 @@ dependencies:
 - transformers == 0.5.*
 - dlist == 0.8.*
 - binary == 0.8.*
+- optparse-applicative >= 0.14 && < 1
 
 library:
   source-dirs: src
 
 executables:
-  wntext-exe:
+  mill:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
