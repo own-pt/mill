@@ -1,7 +1,3 @@
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE NamedFieldPuns        #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-
 module Validate where
 
 import Data

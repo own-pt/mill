@@ -1,9 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
 module Lib
     ( parseLexicographerFile
     , parseLexicographerFiles
     , validateLexicographerFile
+    , validateLexicographerFiles
     , lexicographerFilesToTriples
+    , readConfig
     ) where
 
 import Data (Synset,Unvalidated,Validated)
