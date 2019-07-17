@@ -13,9 +13,12 @@ import click
 wn30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
 
 @click.command()
-@click.argument('rdf_file', type=click.Path(exists=True, dir_okay=False, resolve_path=True), required=True)
-@click.argument('config_dir', type=click.Path(exists=True, file_okay=False, resolve_path=True), required=True)
-@click.argument('output_dir', type=click.Path(file_okay=False, resolve_path=True, writable=True), required=True)
+@click.argument('rdf_file', type=click.Path(exists=True, dir_okay=False, resolve_path=True)
+                , required=True)
+@click.argument('config_dir', type=click.Path(exists=True, file_okay=False, resolve_path=True)
+                , required=True)
+@click.argument('output_dir', type=click.Path(file_okay=False, resolve_path=True, writable=True)
+                , required=True)
 @click.option('-f', '--rdf-file-format', 'rdf_file_format', type=click.STRING, help = "Type of RDF input file. Must be accepted by RDFlib.")
 def main (rdf_file, config_dir, output_dir, rdf_file_format="nt"):
     (synset_relations, word_relations, frames_to_id) = read_config(config_dir)
@@ -100,6 +103,8 @@ def word_sense_id(graph, lexicographer_file, word_sense):
 def print_synset(graph, synset, lexicographerFile, synset_relations,
                  word_relations, frames_to_id, write):
     def sorted_word_senses(synset):
+        # TODO: sort by lexform, not containsWordSense which uses the
+        # lemma (I think)
         return sorted(graph.objects(synset, wn30["containsWordSense"]),
                       key=lambda ws: graph.value(ws, wn30["senseKey"]))
 
