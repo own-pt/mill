@@ -5,6 +5,7 @@ module Lib
     , validateLexicographerFiles
     , lexicographerFilesToTriples
     , readConfig
+    , lexicographerFilesInDirectoryToTriples
     ) where
 
 import Data (Synset,Unvalidated,Validated)
@@ -12,33 +13,34 @@ import Parse (parseLexicographer)
 import Validate (validateSynsetsInIndex, Validation(..), SourceError, makeIndex
                 , validateSynsets, validation, showSourceError)
 
+import Control.Monad (unless,(>>))
+import Data.Binary (encodeFile)
+import Data.Binary.Builder (toLazyByteString)
+import Data.Either
+import Data.Functor(($>),void)
+import Data.List (partition)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Control.Monad (unless,(>>))
-import Data.Either
+import Data.RDF.Encoder.NQuads (encodeRDFGraph)
+import Data.RDF.ToRDF (toTriples)
+import Data.RDF.Types (RDFGraph(..), IRI(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Read as TR
-import Data.Functor(($>),void)
-import System.FilePath ((</>), takeDirectory)
 import System.Directory (doesDirectoryExist)
-import Data.RDF.Encoder.NQuads (encodeRDFGraph)
-import Data.RDF.ToRDF (toTriples)
-import Data.RDF.Types (RDFGraph(..), IRI(..))
-import Data.Binary (encodeFile)
-import Data.Binary.Builder (toLazyByteString)
+import System.FilePath ((</>), takeDirectory)
 
 
-parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
-parseLexicographerFile fileName = do
+parseLexicographerFile :: (Text, FilePath) -> IO (Either () [Synset Unvalidated])
+parseLexicographerFile (lexFileId, fileName) = do
   content <- TIO.readFile fileName
-  case parseLexicographer fileName content of
+  case parseLexicographer fileName lexFileId content of
     Left err -> putStr err $> Left ()
-    Right (_, _, lexFileSynsets) ->
+    Right lexFileSynsets ->
       return $ Right lexFileSynsets
 
-parseLexicographerFiles :: [FilePath] -> IO (Validation [SourceError] [Synset Validated])
+parseLexicographerFiles :: [(Text, FilePath)] -> IO (Validation [SourceError] [Synset Validated])
 parseLexicographerFiles fileNames = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile fileNames
   case partitionEithers lexFilesSynsetsOrErrors of
@@ -83,24 +85,26 @@ readConfig configurationDir = do
     relationsReader [_,relationName,rdfName,_,_,_] = Right (relationName, rdfName)
     relationsReader _ = Left "Wrong number of fields in relations.tsv"
 
-lexicographerFilesInDirectory :: FilePath -> IO [FilePath]
+lexicographerFilesInDirectory :: FilePath -> IO [(Text, FilePath)]
 lexicographerFilesInDirectory filesDirectory = do
   doesDirectoryExist' <- doesDirectoryExist filesDirectory
   if doesDirectoryExist'
     then do
       Config{lexnamesToId} <- readConfig filesDirectory
-      let lexnames = map ((</>) filesDirectory . T.unpack . fst)
+      let lexnames = map (go .fst)
                        $ M.toList lexnamesToId
       return lexnames
     else
     putStrLn ("Directory " ++ filesDirectory ++ "does not exist.") >> return []
-
-
+  where
+    go lexFileId = (lexFileId, filesDirectory </> T.unpack lexFileId)
+    
 validateLexicographerFile :: FilePath -> IO ()
 validateLexicographerFile fileName = do
   lexicographerFiles <- lexicographerFilesInDirectory $ takeDirectory fileName
-  let otherLexicographerFiles = filter (/= fileName) lexicographerFiles
-  go fileName otherLexicographerFiles
+  case partition ((==) fileName . snd) lexicographerFiles of
+    ([fileToValidate], otherLexicographerFiles) -> go fileToValidate otherLexicographerFiles
+    _ -> putStrLn $ "File " ++ fileName ++ " is not specified in lexnames.tsv"
   where
     go fileToValidate otherFiles = do
       lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
@@ -136,9 +140,16 @@ synsetsToTriples synsets outputFile =
   where
     synsetsTriples = concatMap (toTriples wn30) synsets
 
-lexicographerFilesToTriples :: [FilePath] -> FilePath -> IO ()
+lexicographerFilesToTriples :: [(Text, FilePath)] -> FilePath -> IO ()
 lexicographerFilesToTriples fileNames outputFile = do
   synsetsValid <- parseLexicographerFiles fileNames
   case synsetsValid of
     (Success synsets) -> synsetsToTriples synsets outputFile
-    (Failure _) -> void $ putStrLn "error"
+    (Failure _) -> void
+      $ putStrLn "Errors in lexicographer files, please validate them before exporting."
+
+lexicographerFilesInDirectoryToTriples :: FilePath -> FilePath -> IO ()
+lexicographerFilesInDirectoryToTriples lexicographerDir outputFile = do
+  lexicographerFiles <- lexicographerFilesInDirectory lexicographerDir
+  lexicographerFilesToTriples lexicographerFiles outputFile
+  

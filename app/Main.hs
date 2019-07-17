@@ -1,16 +1,14 @@
 module Main where
 
-import Lib(validateLexicographerFile,validateLexicographerFiles)
+import Lib ( validateLexicographerFile
+           , validateLexicographerFiles
+           , lexicographerFilesInDirectoryToTriples)
 
+import System.Directory (doesDirectoryExist)
 import Options.Applicative
 
-data ValidateCommand = ValidateFile FilePath
-  | ValidateAll FilePath deriving Show
-
-data ExportCommand = ExportCommand [FilePath] deriving Show
-
-data Command = ValidateSubCommand ValidateCommand
-  | ExportSubCommand ExportCommand deriving Show
+data Command = Validate FilePath
+  | ExportCommand FilePath FilePath deriving Show
 
 showHelpOnErrorExecParser :: ParserInfo a -> IO a
 showHelpOnErrorExecParser = customExecParser (prefs showHelpOnError)
@@ -20,30 +18,28 @@ parseCommand = subparser $
   -- validate
   command
    "validate"
-   (info (helper <*> (ValidateSubCommand <$> parseValidateCommand))
+   (info (helper <*> parseValidateCommand)
    (fullDesc <> progDesc "Validate lexicographer files"))
   <>
   -- export
   command
    "export"
-   (info (helper <*> (ExportSubCommand <$> parseExportCommand))
+   (info (helper <*> parseExportCommand)
    (fullDesc <> progDesc "Export lexicographer files"))
 
-parseValidateCommand :: Parser ValidateCommand
-parseValidateCommand =
-      ValidateFile <$> validateFileParser
-  <|> ValidateAll  <$> validateAllParser
+parseValidateCommand :: Parser Command
+parseValidateCommand = Validate <$> validateParser
   where
-    validateFileParser = argument str
-      (metavar "LEXFILE" <> help "Name of lexicographer file to validate")
-    validateAllParser  = argument str
-      (metavar "DIR" <> help "Directory where lexicographer files are in")
+    validateParser = argument str
+      (metavar "PATH" <> help "Validates one lexicographer file in case PATH is a file, else validates all lexicographer files in directory")
 
-parseExportCommand :: Parser ExportCommand
-parseExportCommand = ExportCommand <$> filePaths
+parseExportCommand :: Parser Command
+parseExportCommand = ExportCommand <$> lexDirectory <*> outputFile
   where
-    filePaths = some $ argument str
-      (metavar "LEXFILE" <> help "Name of lexicographer file to export")
+    lexDirectory = argument str
+      (metavar "DIR" <> help "Directory where lexicographer files to export are in")
+    outputFile = argument str
+      (metavar "FILE" <> help "Output file path")
 
 millProgDesc :: String
 millProgDesc =
@@ -58,6 +54,10 @@ main = do
     $ info (helper <*> parseCommand)
     (fullDesc <> progDesc millProgDesc <> header "wntext")
   case commandToRun of
-    ValidateSubCommand (ValidateFile lexFile) -> validateLexicographerFile lexFile
-    ValidateSubCommand (ValidateAll lexFilesDir) -> validateLexicographerFiles lexFilesDir
-    _ -> return ()
+    Validate filepath -> do
+      isDirectory <- doesDirectoryExist filepath
+      if isDirectory
+        then validateLexicographerFiles filepath
+        else validateLexicographerFile filepath
+    (ExportCommand lexDirectory outputFile) ->
+      lexicographerFilesInDirectoryToTriples lexDirectory outputFile
