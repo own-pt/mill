@@ -1,7 +1,8 @@
 # -*- mode: org -*-
 #+TITLE: mill: edit and convert wordnet data in human-readable text format
 
-**this is a work in progress -- things will break**
+*this is a work in progress -- it is incomplete, and things will
+change*
 
 * Data format
 - order matters (because we also want to print to this format after
