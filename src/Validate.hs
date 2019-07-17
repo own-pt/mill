@@ -3,7 +3,7 @@ module Validate where
 import Data
 
 import Data.List hiding (insert)
-import Data.List.NonEmpty(NonEmpty((:|)))
+import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -97,8 +97,8 @@ checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition,
 --- https://www.reddit.com/r/haskell/comments/7hqodd/pure_functional_validation/
 
 -- [] also check order
-checkSynsetRelationsTargets :: Index a -> NonEmpty SynsetRelation
-  -> Validation [WNError] (NonEmpty SynsetRelation)
+checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
+  -> Validation [WNError] [SynsetRelation]
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
     checkSynsetRelation synsetRelation@(SynsetRelation _ (SynsetIdentifier (lexFileId, wordForm, lexicalId))) =

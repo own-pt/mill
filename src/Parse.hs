@@ -3,15 +3,17 @@ module Parse where
 import Data
 
 import Control.Applicative hiding (some,many)
-import Control.Monad.State.Strict
+import qualified Control.Applicative.Combinators.NonEmpty as NC
+import Control.Monad (void)
+import Control.Monad.Reader (Reader,runReader,ask)
 import Data.Char
 import Data.Either
+import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
-import Data.Void (Void)
-import qualified Control.Applicative.Combinators.NonEmpty as NC
-import Text.Megaparsec hiding (State)
-import Text.Megaparsec.Char
 import qualified Data.Text as T
+import Data.Void (Void)
+import Text.Megaparsec
+import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 
@@ -20,30 +22,37 @@ type RawSynset = Either (ParseError Text Void) (Synset Unvalidated)
 
 -- State stores in which lexicographer file we're in, this is useful
 -- to fill in implicit references
-type Parser = ParsecT Void Text (State LexicographerFileId)
+type Parser = ParsecT Void Text (Reader LexicographerFileId)
 
-parseLexicographer :: String -> Text
-  -> Either String (LexicographerFileId, Int, [Synset Unvalidated])
-parseLexicographer fileName inputText =
-  case evalState (runParserT lexicographerFile fileName inputText) (LexicographerFileId "all.all") of
-    Right (lexicographerFileName, lexicographerIdentifier, rawSynsets)
+parseLexicographer :: String -> Text -> Text
+  -> Either String [Synset Unvalidated]
+parseLexicographer fileName lexicographerFileId inputText =
+  case runReader (runParserT lexicographerFile fileName inputText)
+                 (LexicographerFileId lexicographerFileId)
+  of
+    Right rawSynsets
       -> case partitionEithers rawSynsets of
-           ([], synsetsToValidate) ->
-             Right (lexicographerFileName, lexicographerIdentifier, synsetsToValidate)
-           (parseErrors, _) -> Left $ concatMap parseErrorPretty parseErrors
+           ([], synsetsToValidate) -> Right synsetsToValidate
+           (parseErrors, _) -> Left . errorBundlePretty
+                                 $ ParseErrorBundle (NE.fromList parseErrors) initialPosState
     Left errors -> Left $ errorBundlePretty errors
+  where
+    initialPosState = PosState
+      { pstateInput = inputText
+      , pstateOffset = 0
+      , pstateSourcePos = initialPos fileName
+      , pstateTabWidth = defaultTabWidth
+      , pstateLinePrefix = ""
+      }
 
 
-lexicographerFile :: Parser (LexicographerFileId, Int, [RawSynset])
+lexicographerFile :: Parser [RawSynset]
 lexicographerFile = do
   _ <- spaceConsumer
-  lexicographerFileName <- LexicographerFileId <$> word <?> "Lexicographer file name"
-  lexicographerFileNumber <- integer <?> "Lexicographer file identifier"
-  put lexicographerFileName
-  _ <- linebreaks
+  _ <- many linebreaks
   rawSynsets <- synsets
   _ <- eof
-  return (lexicographerFileName, lexicographerFileNumber, rawSynsets)
+  return rawSynsets
 
 synsets :: Parser [RawSynset]
 synsets = synsetOrError `sepEndBy1` many linebreak
@@ -55,12 +64,12 @@ synsets = synsetOrError `sepEndBy1` many linebreak
 synset :: Parser (Synset Unvalidated)
 synset = do
   startOffset <- getOffset
-  lexicographerId <- get
+  lexicographerId <- ask
   synsetWordSenses <- wordSenseStatement `NC.endBy1` linebreak
   synsetDefinition <-  definitionStatement <* linebreak
   synsetExamples <- exampleStatement `endBy` linebreak
   synsetFrames <- option [] (framesStatement <* linebreak)
-  synsetRelations <- synsetRelationStatement `NC.endBy1` linebreak
+  synsetRelations <- synsetRelationStatement `endBy` linebreak
   endOffset <- getOffset
   return $ Synset (SourcePosition (startOffset, endOffset)) lexicographerId synsetWordSenses synsetDefinition synsetExamples synsetFrames synsetRelations
 
@@ -88,8 +97,6 @@ statement name parser = L.nonIndented spaceConsumer go
 definitionStatement :: Parser Text
 definitionStatement = statement "d" textBlock
 
---- >>> parseTest definitionStatement "d: oi amigos\n"
-
 exampleStatement :: Parser Text
 exampleStatement = statement "e" textBlock
 
@@ -113,7 +120,7 @@ wordSenseIdentifier = WordSenseIdentifier <$> identifier
 identifier :: Parser (LexicographerFileId, WordSenseForm, LexicalId)
 identifier =
   (,,) <$>
-  (lexicographerIdentifier <|> get) <*> fmap WordSenseForm word <*> lexicalIdentifier
+  (try lexicographerIdentifier <|> ask) <*> fmap WordSenseForm word <*> lexicalIdentifier
   where
     lexicographerFilePos :: Parser Text
     lexicographerFilePos = choice $
@@ -126,9 +133,6 @@ identifier =
       fileName <- lexicographerFileName
       _ <- string ":"
       return $ LexicographerFileId $ T.concat [pos,".",fileName]
-
--- >>> parseTest wordSense "artifact 2"
--- ("artifact",2)
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
@@ -149,8 +153,6 @@ framesStatement = statement "fs" frameNumbers
 
 frameNumbers :: Parser [Int]
 frameNumbers = some (integer <?> "Frame number")
--- >>> parseTest framesStatement "fs: 2 3"
--- [2,3]
 
 whiteSpaceConsumer :: Parser ()
 whiteSpaceConsumer = L.space (void spaceChar) empty empty
@@ -161,13 +163,9 @@ lineText = T.stripEnd <$> takeWhileP Nothing (/= '\n')
 textBlock :: Parser Text
 textBlock = T.unwords <$> lineText `sepBy1` try (eol *> some (char ' '))
 
--- >>> parseTest textBlock "foo\n bar"
--- "foo bar"
-
 linebreak :: Parser ()
 linebreak = void $ lexeme eol
 
 linebreaks :: Parser ()
 linebreaks = void $ some linebreak
 
---- >>> parseTest synset "w: A-line\nhyper: woman's_clothing\nd: women's clothing that has a fitted top and a flared skirt that is widest at the hemline;\n   it is called the A-line because the effect resembles the capital letter A"

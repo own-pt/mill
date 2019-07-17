@@ -62,7 +62,7 @@ data Synset a = Synset
   , definition           :: Text
   , examples             :: [Text]
   , frames               :: [Int]
-  , relations            :: NonEmpty SynsetRelation
+  , relations            :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
   } deriving (Show,Eq)
 
 ---
