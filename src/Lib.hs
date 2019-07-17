@@ -21,14 +21,13 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Read as TR
 import Data.Functor(($>),void)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 import System.Directory (doesDirectoryExist)
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
-import Data.RDF.ToRDF (ToRDF(..), toTriples, Triples, RDFGen)
+import Data.RDF.ToRDF (toTriples)
 import Data.RDF.Types (RDFGraph(..), IRI(..))
 import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
-import Control.Monad.Trans.Reader (ReaderT(..))
 
 
 parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
@@ -36,7 +35,7 @@ parseLexicographerFile fileName = do
   content <- TIO.readFile fileName
   case parseLexicographer fileName content of
     Left err -> putStr err $> Left ()
-    Right (_, _, lexFileSynsets) -> 
+    Right (_, _, lexFileSynsets) ->
       return $ Right lexFileSynsets
 
 parseLexicographerFiles :: [FilePath] -> IO (Validation [SourceError] [Synset Validated])
@@ -49,19 +48,9 @@ parseLexicographerFiles fileNames = do
       in return $ validateSynsetsInIndex index
     _ -> return (Failure [])
 
-validateLexicographerFile :: FilePath -> [FilePath] -> IO ()
-validateLexicographerFile fileToValidate otherFiles = do
-  lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
-  case partitionEithers lexFilesSynsetsOrErrors of
-    ([], lexFilesSynsets@(synsetsToValidate:_)) ->
-      let synsets = concat lexFilesSynsets
-          index   = makeIndex synsets
-      in validation (mapM_ (TIO.putStrLn . showSourceError)) (void . return)
-         $ validateSynsets index synsetsToValidate
-    _ -> return ()
-
 data Config = Config
-  { lexnames :: Map Text Int
+  { lexnamesToId :: Map Text Int
+  , relationRDFNames :: Map Text Text
   } deriving (Show,Eq)
 
 readTSV :: Ord a => FilePath -> ([Text] -> Either String (a, b)) -> IO (Map a b)
@@ -81,15 +70,60 @@ readConfig :: FilePath -> IO Config
 readConfig configurationDir = do
   isDirectory <- doesDirectoryExist configurationDir
   unless isDirectory (putStrLn "Filepath must be a directory")
-  lexnames' <- readTSV (configurationDir </> "lexnames.tsv") lexnamesReader
-  return $ Config lexnames'
+  lexnamesToId' <- readTSV (configurationDir </> "lexnames.tsv") lexnamesReader
+  relationRDFNames' <- readTSV (configurationDir </> "relations.tsv") relationsReader
+  return $ Config lexnamesToId' relationRDFNames'
   where
     lexnamesReader [lexnameIdStr, lexicographerFile, _] =
       case TR.decimal lexnameIdStr of
         Left err -> Left err
         Right (lexnameId, "") -> Right (lexicographerFile, lexnameId)
         Right (_, trailing) -> Left $ "Trailing garbage after " ++ T.unpack trailing
-    lexnamesReader _ = Left "Wrong number of fields"
+    lexnamesReader _ = Left "Wrong number of fields in lexnames.tsv"
+    relationsReader [_,relationName,rdfName,_,_,_] = Right (relationName, rdfName)
+    relationsReader _ = Left "Wrong number of fields in relations.tsv"
+
+lexicographerFilesInDirectory :: FilePath -> IO [FilePath]
+lexicographerFilesInDirectory filesDirectory = do
+  doesDirectoryExist' <- doesDirectoryExist filesDirectory
+  if doesDirectoryExist'
+    then do
+      Config{lexnamesToId} <- readConfig filesDirectory
+      let lexnames = map ((</>) filesDirectory . T.unpack . fst)
+                       $ M.toList lexnamesToId
+      return lexnames
+    else
+    putStrLn ("Directory " ++ filesDirectory ++ "does not exist.") >> return []
+
+
+validateLexicographerFile :: FilePath -> IO ()
+validateLexicographerFile fileName = do
+  lexicographerFiles <- lexicographerFilesInDirectory $ takeDirectory fileName
+  let otherLexicographerFiles = filter (/= fileName) lexicographerFiles
+  go fileName otherLexicographerFiles
+  where
+    go fileToValidate otherFiles = do
+      lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
+      case partitionEithers lexFilesSynsetsOrErrors of
+        ([], lexFilesSynsets@(synsetsToValidate:_)) ->
+          let synsets = concat lexFilesSynsets
+              index   = makeIndex synsets
+          in validation (mapM_ (TIO.putStrLn . showSourceError)) (void . return)
+             $ validateSynsets index synsetsToValidate
+        _ -> return ()
+
+validateLexicographerFiles :: FilePath -> IO ()
+validateLexicographerFiles filesDirectory = do
+  lexicographerFiles <- lexicographerFilesInDirectory filesDirectory
+  lexFilesSynsetsOrErrors <- mapM parseLexicographerFile lexicographerFiles
+  case partitionEithers lexFilesSynsetsOrErrors of
+    ([], lexfilesSynsets) ->
+      let synsets = concat lexfilesSynsets
+          index = makeIndex synsets
+          in validation (mapM_ (TIO.putStrLn . showSourceError)) (void . return)
+               $ validateSynsets index synsets
+    _ -> return ()
+
 
 wn30 :: IRI
 wn30 = "https://w3id.org/own-pt/wn30-en/"

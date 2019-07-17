@@ -2,12 +2,12 @@ name:                wntext
 version:             0.1.0.0
 github:              "own-pt/wntext"
 license:             Apache-2.0
-author:              "Bruno Cuconato"
+author:              "bruno cuconato"
 maintainer:          "bcclaro+haskell@gmail.com"
 copyright:           "2019 IBM Corporation"
 
 extra-source-files:
-- README.md
+- README
 - ChangeLog.md
 
 # Metadata used when publishing your package
@@ -32,6 +32,13 @@ dependencies:
 - generic-trie > 0.2.0 && < 1.0
 - mtl == 2.*
 - containers == 0.6.*
+- filepath == 1.*
+- parser-combinators == 1.*
+- rdf == 0.1.*
+- directory == 1.*
+- transformers == 0.5.*
+- dlist == 0.8.*
+- binary == 0.8.*
 
 library:
   source-dirs: src

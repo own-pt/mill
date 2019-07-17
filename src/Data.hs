@@ -9,7 +9,7 @@ import qualified Data.Text as T
 import Data.List.NonEmpty(NonEmpty)
 import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
                        IRI(..), Triple(..))
-import Data.RDF.ToRDF (ToRDF(..),ToObject(..), RDFGen, runRDFGen, appBaseIRI,Triples)
+import Data.RDF.ToRDF (ToRDF(..),ToObject(..), RDFGen, appBaseIRI,Triples)
 import qualified Data.List.NonEmpty as NE
 import Control.Monad.Trans.Reader (ask)
 import Data.Monoid (Endo(..))
