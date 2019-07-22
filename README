@@ -18,9 +18,11 @@ e: we found an abandoned ship while diving
 hyper: ship
 #+END_EXAMPLE
 
+
 * Configuration files
 The tooling in this repository assumes a few configuration files in
 TSV format.
+
 
 * Installation
 ** Python
@@ -31,6 +33,7 @@ TSV format.
 - [[https://docs.haskellstack.org/en/stable/README/][install stack]]
 - run
   : stack build --copy-bins
+
 
 * Features
 ** RDF -> text
@@ -45,3 +48,9 @@ see
 ** Validate wordnet data
 see
 : mill validate --help
+
+
+* Why the name mill?
+=mill= aims to fulfill the same role that =grind= once did. It's been
+named =mill= because it's a synonym of =grind= and is also a prefix of
+[[https://en.wikipedia.org/wiki/George_Armitage_Miller][Miller]].
