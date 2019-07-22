@@ -58,12 +58,16 @@ data WNError
   | UnsortedSynsetWordSenses (NonEmpty WordSenseForm)
   deriving (Show)
 
-data SourceError = SourceError SourcePosition WNError deriving (Show)
+data SourceError = SourceError LexicographerFileId SourcePosition WNError deriving (Show)
 
 showSourceError :: SourceError -> Text
 -- use http://hackage.haskell.org/package/formatting-6.3.7/docs/Formatting.html ?
-showSourceError (SourceError (SourcePosition pos) wnError) =
-  T.concat ["[", T.pack $ show pos, "] ", showWNError wnError]
+showSourceError (SourceError lexicographerFileId (SourcePosition pos) wnError) =
+  T.concat
+  [ lexicographerFileIdToText lexicographerFileId
+  , ":", T.pack $ show pos, ": "
+  , showWNError wnError
+  ]
   where
     showWNError (MissingSynsetRelationTarget
                  (SynsetRelation relationName synsetId)) =
@@ -74,14 +78,18 @@ showSourceError (SourceError (SourcePosition pos) wnError) =
     showWordSenseForms = T.intercalate ", " . NE.toList . NE.map (\(WordSenseForm wordSenseForm) -> wordSenseForm)
     showWordSenseId (WordSenseIdentifier wordSenseIdentifier) = showIdentifier wordSenseIdentifier
     showSynsetId (SynsetIdentifier synsetIdentifier) = showIdentifier synsetIdentifier
-    showIdentifier (lexicographerFileId, WordSenseForm wordForm, LexicalId lexicalId) =
-      T.concat [wordForm, ":", T.pack . show $ lexicalId, " at file ", lexicographerFileIdToText lexicographerFileId]
+    showIdentifier (lexicographerId, WordSenseForm wordForm, LexicalId lexicalId) =
+      T.concat
+      [ wordForm, ":"
+      , T.pack . show $ lexicalId, " at file "
+      , lexicographerFileIdToText lexicographerId
+      ]
 
 checkSynset :: Index a -> Synset Unvalidated -> Validation [SourceError] (Synset Validated)
 checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
   case result of
     Success synset -> Success synset
-    Failure errors -> Failure $ map (SourceError sourcePosition) errors
+    Failure errors -> Failure $ map (SourceError lexicographerFileId sourcePosition) errors
   where
     result = Synset
       <$> Success sourcePosition
