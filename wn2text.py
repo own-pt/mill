@@ -79,7 +79,7 @@ def print_graph (graph, synset_relations, word_relations, frames_to_id, output_d
             write = lambda data, *args, **kwargs: print(data, file=output_stream,
                                                         *args, **kwargs)
             pos, lexname = lexicographerFile.split(".")
-            write("{} {}".format(pos, lexname), end="\n")
+            write("{}.{}".format(pos, lexname), end="\n\n")
             for synset in graph.subjects(wn30['lexicographerFile'], lexicographerFile):
                 print_synset(graph, synset, lexicographerFile,
                              synset_relations, word_relations, frames_to_id, write)
@@ -98,24 +98,20 @@ def word_sense_id(graph, lexicographer_file, word_sense):
                                word_form,
                                " {}".format(lexical_id) if lexical_id.neq("0") else "")
     else:
-        #print("Missing {}".format(word_sense))
         pass
 
 def print_synset(graph, synset, lexicographerFile, synset_relations,
                  word_relations, frames_to_id, write):
     def sorted_word_senses(synset):
-        # TODO: sort by lexform, not containsWordSense which uses the
-        # lemma (I think)
         return sorted(graph.objects(synset, wn30["containsWordSense"]),
-                      key=lambda ws: graph.value(ws, wn30["senseKey"]))
+                      key=lambda ws: graph.value(ws, wn30["word"]))
 
     def print_relations():
         rels = []
         for predicate, obj in graph.predicate_objects(synset):
-            predicate_name = os.path.basename(os.path.basename(predicate.n3().strip("<>")))
+            _, predicate_name = r.namespace.split_uri(predicate)            
             predicate_txt_name = synset_relations.get(predicate_name, None)
-            # maybe not include frame as relation?
-            if predicate_txt_name == "frames":
+            if predicate_name == "frame":
                 pass
             elif predicate_txt_name:
                 rels.append("{}: {}".format(predicate_txt_name,
@@ -161,7 +157,7 @@ def print_word_sense(graph, word_sense, lexicographerFile,
                                                  word_sense_id(graph, lexicographerFile, obj)))
         if frames:
             frames.sort()
-            write(" frames {}".format(" ".join(frames)), end="")
+            write(" fs {}".format(" ".join(frames)), end="")
         if marker:
             [marker] = marker # check that there is only one marker
             write(" marker {}".format(marker, end=""))
