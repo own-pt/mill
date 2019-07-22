@@ -2,8 +2,7 @@
 
 import os
 import rdflib as r
-from rdflib import Graph
-from rdflib import Namespace
+from rdflib import Graph, Namespace
 import click
 
 # missing:
@@ -79,6 +78,8 @@ def print_graph (graph, synset_relations, word_relations, frames_to_id, output_d
         with open(os.path.join(output_dir, lexicographerFile), 'w') as output_stream:
             write = lambda data, *args, **kwargs: print(data, file=output_stream,
                                                         *args, **kwargs)
+            pos, lexname = lexicographerFile.split(".")
+            write("{} {}".format(pos, lexname), end="\n")
             for synset in graph.subjects(wn30['lexicographerFile'], lexicographerFile):
                 print_synset(graph, synset, lexicographerFile,
                              synset_relations, word_relations, frames_to_id, write)
@@ -147,17 +148,23 @@ def print_word_sense(graph, word_sense, lexicographerFile,
     def print_word_relations():
         frames = []
         relations = []
+        marker = []
         for predicate, obj in graph.predicate_objects(word_sense):
-            predicate_name = os.path.basename(os.path.basename(predicate.n3().strip("<>")))
+            _, predicate_name = r.namespace.split_uri(predicate)
             predicate_txt_name = relations_map.get(predicate_name, None)
-            if predicate_txt_name == "frames":
+            if predicate_name == "frame":
                 frames.append(frames_to_id[str(obj)])
+            elif predicate_name == "syntacticMarker":
+                marker.append(obj)
             elif predicate_txt_name:
                 relations.append(" {} {}".format(predicate_txt_name,
                                                  word_sense_id(graph, lexicographerFile, obj)))
         if frames:
             frames.sort()
             write(" frames {}".format(" ".join(frames)), end="")
+        if marker:
+            [marker] = marker # check that there is only one marker
+            write(" marker {}".format(marker, end=""))
         relations.sort()
         write("".join(relations))
 
