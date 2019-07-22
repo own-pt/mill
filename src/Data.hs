@@ -70,7 +70,8 @@ data Synset a = Synset
 -- to RDF instances
 
 lexicographerFileIdToText :: LexicographerFileId -> Text
-lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) = T.append (posText wnPOS) filename
+lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) =
+  T.concat [posText wnPOS, ".", filename]
   where
     posText N = "noun"
     posText V = "verb"
@@ -106,17 +107,18 @@ synsetIdentifierToIRI (SynsetIdentifier wnIdentifier) = wnIdentifierToIRI "synse
 
 synsetToTriples :: Synset Validated -> RDFGen Triples
 synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, frames} = do
-  lexicographerFileLiteral <- object lexicographerFileId
-  synsetIri <- fmap IRISubject synsetIriGen
+  lexicographerFileLiteral   <- object lexicographerFileId
+  synsetIri                  <- fmap IRISubject synsetIriGen
   lexicographerFilePredicate <- makePredicate "lexicographerFile"
-  definitionPredicate <- makePredicate "definition"
-  definitionLiteral <- object definition
-  examplePredicate <- makePredicate "example"
-  exampleLiterals <- mapM object examples
+  definitionPredicate        <- makePredicate "definition"
+  definitionLiteral          <- object definition
+  examplePredicate           <- makePredicate "example"
+  exampleLiterals            <- mapM object examples
   containsWordSensePredicate <- makePredicate "containsWordSense"
-  wordSenseObjs <- fmap (map IRIObject) . mapM wordSenseIri $ NE.toList wordSenses
-  framePredicate <- makePredicate "frame"
-  frameLiterals <- mapM object frames
+  wordSenseObjs              <- fmap (map IRIObject)
+                                  . mapM wordSenseIri $ NE.toList wordSenses
+  framePredicate             <- makePredicate "frame"
+  frameLiterals              <- mapM object frames
   return . DL.concat . map DL.fromList $ [
     [ Triple synsetIri lexicographerFilePredicate lexicographerFileLiteral
     , Triple synsetIri definitionPredicate definitionLiteral ]

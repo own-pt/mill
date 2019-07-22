@@ -62,12 +62,12 @@ lexicographerIdP = do
 
 lexicographerFile :: Parser [RawSynset]
 lexicographerFile = do
-  _ <- spaceConsumer
-  lexId <- lexicographerIdP
+  _          <- spaceConsumer
+  lexId      <- lexicographerIdP
   put lexId
-  _ <- many linebreaks
+  _          <- many linebreaks
   rawSynsets <- synsets
-  _ <- eof
+  _          <- eof
   return rawSynsets
 
 synsets :: Parser [RawSynset]
@@ -79,14 +79,14 @@ synsets = synsetOrError `sepEndBy1` many linebreak
 
 synset :: Parser (Synset Unvalidated)
 synset = do
-  startOffset <- getOffset
-  lexicographerId <- get
+  startOffset      <- getOffset
+  lexicographerId  <- get
   synsetWordSenses <- wordSenseStatement `NC.endBy1` linebreak
   synsetDefinition <-  definitionStatement <* linebreak
-  synsetExamples <- exampleStatement `endBy` linebreak
-  synsetFrames <- option [] (framesStatement <* linebreak)
-  synsetRelations <- synsetRelationStatement `endBy` linebreak
-  endOffset <- getOffset
+  synsetExamples   <- exampleStatement `endBy` linebreak
+  synsetFrames     <- option [] (framesStatement <* linebreak)
+  synsetRelations  <- synsetRelationStatement `endBy` linebreak
+  endOffset        <- getOffset
   return $ Synset (SourcePosition (startOffset, endOffset)) lexicographerId synsetWordSenses synsetDefinition synsetExamples synsetFrames synsetRelations
 
 spaceConsumer :: Parser ()
@@ -122,13 +122,16 @@ synsetRelationStatement = L.nonIndented spaceConsumer go
     go = SynsetRelation <$> relationName <*> (SynsetIdentifier <$> identifier)
     relationName = T.stripEnd
       -- [ ] handle this better
-      <$> takeWhile1P (Just "Synset relation name") (`notElem` [':', ' ', '\n'])
+      <$> (takeWhile1P Nothing (`notElem` [':', ' ', '\n']) <?> "Synset relation name")
       <* symbol ":"
 
 wordSenseStatement :: Parser WNWord
 wordSenseStatement = statement "w" go
   where
-    go = WNWord <$> wordSenseIdentifier <*> wordSenseFrames <*> wordSensePointers
+    go = WNWord <$> wordSenseIdentifier <*> wordSenseFrames <* wordSenseMarker
+                <*> wordSensePointers
+    wordSenseFrames = option [] $ symbol "fs" *> frameNumbers
+    wordSenseMarker = optional $ symbol "marker" *> word
 
 wordSenseIdentifier :: Parser WordSenseIdentifier
 wordSenseIdentifier = WordSenseIdentifier <$> identifier
@@ -147,9 +150,6 @@ wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
   where
     go = WordPointer <$> (word <?> "Word pointer") <*> wordSenseIdentifier
-
-wordSenseFrames :: Parser [Int]
-wordSenseFrames = option [] $ symbol "fs" *> frameNumbers
 
 word :: Parser Text
 word = lexeme $ takeWhile1P Nothing (not . isSpace)
