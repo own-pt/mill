@@ -29,8 +29,8 @@ wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexica
 
 senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 -- [ ] this is not really a sense key
-senseKey  (LexicographerFileId lexicographerFileId) (WordSenseForm wordForm) lexicalId =
-  intercalate "\t" [T.unpack wordForm, T.unpack lexicographerFileId, show lexicalId]
+senseKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) lexicalId =
+  intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, show lexicalId]
 
 ---- validation
 data Validation e a = Failure e | Success a deriving (Show,Eq)
@@ -74,8 +74,8 @@ showSourceError (SourceError (SourcePosition pos) wnError) =
     showWordSenseForms = T.intercalate ", " . NE.toList . NE.map (\(WordSenseForm wordSenseForm) -> wordSenseForm)
     showWordSenseId (WordSenseIdentifier wordSenseIdentifier) = showIdentifier wordSenseIdentifier
     showSynsetId (SynsetIdentifier synsetIdentifier) = showIdentifier synsetIdentifier
-    showIdentifier (LexicographerFileId lexicographerFileId, WordSenseForm wordForm, LexicalId lexicalId) =
-      T.concat [wordForm, ":", T.pack . show $ lexicalId, " at file ", lexicographerFileId]
+    showIdentifier (lexicographerFileId, WordSenseForm wordForm, LexicalId lexicalId) =
+      T.concat [wordForm, ":", T.pack . show $ lexicalId, " at file ", lexicographerFileIdToText lexicographerFileId]
 
 checkSynset :: Index a -> Synset Unvalidated -> Validation [SourceError] (Synset Validated)
 checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =

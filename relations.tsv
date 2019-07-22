@@ -23,6 +23,5 @@ $	vg	sameVerbGroupAs	v	synset,word	Verb Group
 @i	ihyper	instanceOf	n	synset	Instance Hypernym (9/11 is a terrorist attack)
 \	pe	pertainsTo	ar	word	Pertainym pertains to noun/adjective
 ^	see	seeAlso	va	synset,word	Also see
-_	frames	frame	v	synset,word	Word frame
 ~	hypo	hyponymOf	nv	synset	Hyponym
 ~i	ihypo	hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)

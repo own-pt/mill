@@ -32,15 +32,15 @@ import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>), takeDirectory)
 
 
-parseLexicographerFile :: (Text, FilePath) -> IO (Either () [Synset Unvalidated])
-parseLexicographerFile (lexFileId, fileName) = do
+parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
+parseLexicographerFile fileName = do
   content <- TIO.readFile fileName
-  case parseLexicographer fileName lexFileId content of
+  case parseLexicographer fileName content of
     Left err -> putStr err $> Left ()
     Right lexFileSynsets ->
       return $ Right lexFileSynsets
 
-parseLexicographerFiles :: [(Text, FilePath)] -> IO (Validation [SourceError] [Synset Validated])
+parseLexicographerFiles :: [FilePath] -> IO (Validation [SourceError] [Synset Validated])
 parseLexicographerFiles fileNames = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile fileNames
   case partitionEithers lexFilesSynsetsOrErrors of
@@ -85,7 +85,7 @@ readConfig configurationDir = do
     relationsReader [_,relationName,rdfName,_,_,_] = Right (relationName, rdfName)
     relationsReader _ = Left "Wrong number of fields in relations.tsv"
 
-lexicographerFilesInDirectory :: FilePath -> IO [(Text, FilePath)]
+lexicographerFilesInDirectory :: FilePath -> IO [FilePath]
 lexicographerFilesInDirectory filesDirectory = do
   doesDirectoryExist' <- doesDirectoryExist filesDirectory
   if doesDirectoryExist'
@@ -97,14 +97,15 @@ lexicographerFilesInDirectory filesDirectory = do
     else
     putStrLn ("Directory " ++ filesDirectory ++ "does not exist.") >> return []
   where
-    go lexFileId = (lexFileId, filesDirectory </> T.unpack lexFileId)
+    go lexFileId = filesDirectory </> T.unpack lexFileId
     
 validateLexicographerFile :: FilePath -> IO ()
 validateLexicographerFile fileName = do
   lexicographerFiles <- lexicographerFilesInDirectory $ takeDirectory fileName
-  case partition ((==) fileName . snd) lexicographerFiles of
+  case partition (fileName ==) lexicographerFiles of
     ([fileToValidate], otherLexicographerFiles) -> go fileToValidate otherLexicographerFiles
-    _ -> putStrLn $ "File " ++ fileName ++ " is not specified in lexnames.tsv"
+    ([], _) -> putStrLn $ "File " ++ fileName ++ " is not specified in lexnames.tsv"
+    _       -> putStrLn $ "File " ++ fileName ++ " is doubly specified in lexnames.tsv"
   where
     go fileToValidate otherFiles = do
       lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
@@ -140,7 +141,7 @@ synsetsToTriples synsets outputFile =
   where
     synsetsTriples = concatMap (toTriples wn30) synsets
 
-lexicographerFilesToTriples :: [(Text, FilePath)] -> FilePath -> IO ()
+lexicographerFilesToTriples :: [FilePath] -> FilePath -> IO ()
 lexicographerFilesToTriples fileNames outputFile = do
   synsetsValid <- parseLexicographerFiles fileNames
   case synsetsValid of

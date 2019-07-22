@@ -8,7 +8,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.List.NonEmpty(NonEmpty)
 import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
-                       IRI(..), Triple(..))
+                       IRI(..), Triple(..),Literal(..),LiteralType(..))
 import Data.RDF.ToRDF (ToRDF(..),ToObject(..), RDFGen, appBaseIRI,Triples)
 import qualified Data.List.NonEmpty as NE
 import Control.Monad.Trans.Reader (ask)
@@ -16,7 +16,8 @@ import Data.Monoid (Endo(..))
 import qualified Data.DList as DL
 
 
-newtype LexicographerFileId = LexicographerFileId Text deriving (Show,Eq,Ord,ToObject)
+data WNPOS = N | V | R | A | S deriving (Show,Eq,Enum,Ord)
+newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Show,Eq,Ord)
 
 newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord, ToObject)
 
@@ -68,11 +69,34 @@ data Synset a = Synset
 ---
 -- to RDF instances
 
+lexicographerFileIdToText :: LexicographerFileId -> Text
+lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) = T.append (posText wnPOS) filename
+  where
+    posText N = "noun"
+    posText V = "verb"
+    posText A = "adj"
+    posText S = "adjs"
+    posText R = "adv"
+
+lexicographerFileIdFromText :: Text -> Maybe LexicographerFileId
+lexicographerFileIdFromText = go . T.breakOn "."
+  where
+    wrap pos name = Just $ LexicographerFileId (pos, name)
+    go ("noun",name) = wrap N name
+    go ("verb",name) = wrap V name
+    go ("adj",name)  = wrap A name
+    go ("adjs",name) = wrap S name
+    go ("adv",name)  = wrap R name
+    go _             = Nothing
+    
+instance ToObject LexicographerFileId where
+  object lexicographerFileId = pure . LiteralObject $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
+
 wnIdentifierToIRI :: Text -> (LexicographerFileId, WordSenseForm, LexicalId) -> RDFGen IRI
-wnIdentifierToIRI prefix (LexicographerFileId lexicoId, WordSenseForm wForm, LexicalId lId) =
+wnIdentifierToIRI prefix (lexicographerFileId, WordSenseForm wForm, LexicalId lId) =
   go <$> ask
   where
-    go baseIri = baseIri {iriPath = T.concat [prefix, "-", lexicoId, "-", wForm, "-", T.pack $ show lId]}
+    go baseIri = baseIri {iriPath = T.concat [prefix, "-", lexicographerFileIdToText lexicographerFileId, "-", wForm, "-", T.pack $ show lId]}
 
 wordSenseIdentifierToIRI :: WordSenseIdentifier -> RDFGen IRI
 wordSenseIdentifierToIRI (WordSenseIdentifier wnIdentifier) = wnIdentifierToIRI "wordsense" wnIdentifier

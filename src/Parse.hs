@@ -5,14 +5,14 @@ import Data
 import Control.Applicative hiding (some,many)
 import qualified Control.Applicative.Combinators.NonEmpty as NC
 import Control.Monad (void)
-import Control.Monad.Reader (Reader,runReader,ask)
+import Control.Monad.State.Strict (State,evalState,get,put)
 import Data.Char
 import Data.Either
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
-import Text.Megaparsec
+import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
@@ -22,14 +22,13 @@ type RawSynset = Either (ParseError Text Void) (Synset Unvalidated)
 
 -- State stores in which lexicographer file we're in, this is useful
 -- to fill in implicit references
-type Parser = ParsecT Void Text (Reader LexicographerFileId)
+type Parser = ParsecT Void Text (State LexicographerFileId)
 
-parseLexicographer :: String -> Text -> Text
+parseLexicographer :: String -> Text
   -> Either String [Synset Unvalidated]
-parseLexicographer fileName lexicographerFileId inputText =
-  case runReader (runParserT lexicographerFile fileName inputText)
-                 (LexicographerFileId lexicographerFileId)
-  of
+parseLexicographer fileName inputText =
+  case evalState (runParserT lexicographerFile fileName inputText)
+                (LexicographerFileId (N, "_")) of
     Right rawSynsets
       -> case partitionEithers rawSynsets of
            ([], synsetsToValidate) -> Right synsetsToValidate
@@ -46,9 +45,26 @@ parseLexicographer fileName lexicographerFileId inputText =
       }
 
 
+lexicographerIdP :: Parser LexicographerFileId
+lexicographerIdP = do
+  pos     <- posP
+  _       <- char '.'
+  lexname <- lexnameP
+  return $ LexicographerFileId (pos, lexname)
+  where
+    posP = N <$ string "noun"
+       <|> V <$ string "verb"
+       <|> S <$ string "adjs"
+       <|> A <$ string "adj"
+       <|> R <$ string "adv"
+    lexnameP = lexeme (takeWhile1P Nothing (`notElem` [' ','\t',':','\n'])
+                 <?> "Lexicographer file name (must not contain whitespace or a colon)")
+
 lexicographerFile :: Parser [RawSynset]
 lexicographerFile = do
   _ <- spaceConsumer
+  lexId <- lexicographerIdP
+  put lexId
   _ <- many linebreaks
   rawSynsets <- synsets
   _ <- eof
@@ -64,7 +80,7 @@ synsets = synsetOrError `sepEndBy1` many linebreak
 synset :: Parser (Synset Unvalidated)
 synset = do
   startOffset <- getOffset
-  lexicographerId <- ask
+  lexicographerId <- get
   synsetWordSenses <- wordSenseStatement `NC.endBy1` linebreak
   synsetDefinition <-  definitionStatement <* linebreak
   synsetExamples <- exampleStatement `endBy` linebreak
@@ -120,19 +136,12 @@ wordSenseIdentifier = WordSenseIdentifier <$> identifier
 identifier :: Parser (LexicographerFileId, WordSenseForm, LexicalId)
 identifier =
   (,,) <$>
-  (try lexicographerIdentifier <|> ask) <*> fmap WordSenseForm word <*> lexicalIdentifier
+  (try lexicographerIdentifier <|> get) <*> fmap WordSenseForm word <*> lexicalIdentifier
   where
-    lexicographerFilePos :: Parser Text
-    lexicographerFilePos = choice $
-      map string ["noun", "verb", "adjs", "adj", "adv"]
-    lexicographerFileName = takeWhile1P Nothing (/= ':')
-    lexicographerIdentifier :: Parser LexicographerFileId
     lexicographerIdentifier = do
-      pos <- lexicographerFilePos
-      _ <- string "."
-      fileName <- lexicographerFileName
+      lexId <- lexicographerIdP
       _ <- string ":"
-      return $ LexicographerFileId $ T.concat [pos,".",fileName]
+      return lexId
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
@@ -140,7 +149,7 @@ wordSensePointers = many go
     go = WordPointer <$> (word <?> "Word pointer") <*> wordSenseIdentifier
 
 wordSenseFrames :: Parser [Int]
-wordSenseFrames = option [] $ symbol "frames" *> frameNumbers
+wordSenseFrames = option [] $ symbol "fs" *> frameNumbers
 
 word :: Parser Text
 word = lexeme $ takeWhile1P Nothing (not . isSpace)
