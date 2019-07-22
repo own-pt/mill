@@ -99,16 +99,17 @@ wnIdentifierToIRI prefix (lexicographerFileId, WordSenseForm wForm, LexicalId lI
   where
     go baseIri = baseIri {iriPath = T.concat [prefix, "-", lexicographerFileIdToText lexicographerFileId, "-", wForm, "-", T.pack $ show lId]}
 
-wordSenseIdentifierToIRI :: WordSenseIdentifier -> RDFGen IRI
-wordSenseIdentifierToIRI (WordSenseIdentifier wnIdentifier) = wnIdentifierToIRI "wordsense" wnIdentifier
+wordSenseIRI :: WNWord -> RDFGen IRI
+wordSenseIRI (WNWord (WordSenseIdentifier wnIdentifier) _ _) =
+  wnIdentifierToIRI "wordsense" wnIdentifier
 
 synsetIdentifierToIRI :: SynsetIdentifier -> RDFGen IRI
 synsetIdentifierToIRI (SynsetIdentifier wnIdentifier) = wnIdentifierToIRI "synset" wnIdentifier
 
 synsetToTriples :: Synset Validated -> RDFGen Triples
-synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, frames} = do
+synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, frames = synsetFrames} = do
   lexicographerFileLiteral   <- object lexicographerFileId
-  synsetIri                  <- fmap IRISubject synsetIriGen
+  synsetIri                  <- IRISubject <$> synsetIriGen
   lexicographerFilePredicate <- makePredicate "lexicographerFile"
   definitionPredicate        <- makePredicate "definition"
   definitionLiteral          <- object definition
@@ -116,20 +117,39 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, fr
   exampleLiterals            <- mapM object examples
   containsWordSensePredicate <- makePredicate "containsWordSense"
   wordSenseObjs              <- fmap (map IRIObject)
-                                  . mapM wordSenseIri $ NE.toList wordSenses
+                                  . mapM wordSenseIRI $ wordSenses'
   framePredicate             <- makePredicate "frame"
-  frameLiterals              <- mapM object frames
-  return . DL.concat . map DL.fromList $ [
+  frameLiterals              <- mapM object synsetFrames
+  wordSenseTriples           <- concat <$> mapM wordSenseToTriples wordSenses'
+  return . DL.concat $ map DL.fromList [
     [ Triple synsetIri lexicographerFilePredicate lexicographerFileLiteral
     , Triple synsetIri definitionPredicate definitionLiteral ]
     , map (Triple synsetIri examplePredicate) exampleLiterals
     , map (Triple synsetIri containsWordSensePredicate) wordSenseObjs
-    , map (Triple synsetIri framePredicate) frameLiterals ]
+    , map (Triple synsetIri framePredicate) frameLiterals
+    , wordSenseTriples
+    ]
   where
-    wordSenseIri (WNWord wordSenseId _ _) = wordSenseIdentifierToIRI wordSenseId
+    wordSenses' = NE.toList wordSenses
     makePredicate path = fmap Predicate . appBaseIRI $ Endo (\baseIri -> baseIri {iriPath = path})
     synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
-    headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier) $ NE.head wordSenses
+    headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier)
+      $ NE.head wordSenses
+    wordSenseToTriples :: WNWord -> RDFGen [Triple]
+    wordSenseToTriples wordSense@(WNWord (WordSenseIdentifier (_, wordForm, _)) frames _) = do
+      wordSenseIri         <- IRISubject <$> wordSenseIRI wordSense
+      lexicalFormPredicate <- makePredicate "lexicalForm"
+      lexicalForm          <- object wordForm
+      framePredicate       <- makePredicate "frame"
+      frameLiterals        <- mapM object frames
+      return $ concat [
+        [
+          Triple wordSenseIri lexicalFormPredicate lexicalForm
+        ],
+        map (Triple wordSenseIri framePredicate) frameLiterals
+        , [] -- TODO: word relations
+        ]
+  
 
 instance ToRDF (Synset Validated) where
    triples = synsetToTriples
