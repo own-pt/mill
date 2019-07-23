@@ -7,7 +7,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.GenericTrie
+import Data.GenericTrie (Trie, fromList, member, foldWithKey, empty, insert)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?

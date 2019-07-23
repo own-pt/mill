@@ -4,16 +4,16 @@
 
 module Data where
 
-import Data.Text (Text)
-import qualified Data.Text as T
+import Control.Monad.Trans.Reader (ask)
+import qualified Data.DList as DL
+import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty(NonEmpty)
+import Data.Monoid (Endo(..))
+import Data.RDF.ToRDF (ToRDF(..),ToObject(..), RDFGen, appBaseIRI,Triples)
 import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
                        IRI(..), Triple(..),Literal(..),LiteralType(..))
-import Data.RDF.ToRDF (ToRDF(..),ToObject(..), RDFGen, appBaseIRI,Triples)
-import qualified Data.List.NonEmpty as NE
-import Control.Monad.Trans.Reader (ask)
-import Data.Monoid (Endo(..))
-import qualified Data.DList as DL
+import Data.Text (Text)
+import qualified Data.Text as T
 
 
 data WNPOS = N | V | R | A | S deriving (Show,Eq,Enum,Ord)

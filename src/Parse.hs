@@ -6,14 +6,14 @@ import Control.Applicative hiding (some,many)
 import qualified Control.Applicative.Combinators.NonEmpty as NC
 import Control.Monad (void)
 import Control.Monad.State.Strict (State,evalState,get,put)
-import Data.Char
-import Data.Either
+import Data.Char (isSpace)
+import Data.Either (partitionEithers)
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
 import Text.Megaparsec hiding (State)
-import Text.Megaparsec.Char
+import Text.Megaparsec.Char (char, spaceChar, string, eol)
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 
