@@ -99,8 +99,8 @@ wnIdentifierToIRI prefix (lexicographerFileId, WordSenseForm wForm, LexicalId lI
   where
     go baseIri = baseIri {iriPath = T.concat [prefix, "-", lexicographerFileIdToText lexicographerFileId, "-", wForm, "-", T.pack $ show lId]}
 
-wordSenseIRI :: WNWord -> RDFGen IRI
-wordSenseIRI (WNWord (WordSenseIdentifier wnIdentifier) _ _) =
+wordSenseIdIRI :: WordSenseIdentifier -> RDFGen IRI
+wordSenseIdIRI (WordSenseIdentifier wnIdentifier) =
   wnIdentifierToIRI "wordsense" wnIdentifier
 
 synsetIdentifierToIRI :: SynsetIdentifier -> RDFGen IRI
@@ -130,24 +130,31 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, fr
     , wordSenseTriples
     ]
   where
+    wordSenseIRI (WNWord wordSenseId _ _) = wordSenseIdIRI wordSenseId
     wordSenses' = NE.toList wordSenses
     makePredicate path = fmap Predicate . appBaseIRI $ Endo (\baseIri -> baseIri {iriPath = path})
     synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
     headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier)
       $ NE.head wordSenses
     wordSenseToTriples :: WNWord -> RDFGen [Triple]
-    wordSenseToTriples wordSense@(WNWord (WordSenseIdentifier (_, wordForm, _)) frames _) = do
+    wordSenseToTriples wordSense@(WNWord (WordSenseIdentifier (_, wordForm, _)) frames pointers) = do
       wordSenseIri         <- IRISubject <$> wordSenseIRI wordSense
       lexicalFormPredicate <- makePredicate "lexicalForm"
       lexicalForm          <- object wordForm
       framePredicate       <- makePredicate "frame"
       frameLiterals        <- mapM object frames
+      pointersIris         <- mapM (makePredicate . (\(WordPointer pointerName _) -> pointerName))
+                                   pointers
+      targetsIris          <- map IRIObject
+                                <$> mapM (wordSenseIdIRI
+                                          . (\(WordPointer _ targetWordSenseId) -> targetWordSenseId))
+                                   pointers
       return $ concat [
         [
           Triple wordSenseIri lexicalFormPredicate lexicalForm
-        ],
-        map (Triple wordSenseIri framePredicate) frameLiterals
-        , [] -- TODO: word relations
+        ]
+        , map (Triple wordSenseIri framePredicate) frameLiterals
+        , zipWith (Triple wordSenseIri) pointersIris targetsIris
         ]
   
 
