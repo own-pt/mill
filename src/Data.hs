@@ -107,7 +107,8 @@ synsetIdentifierToIRI :: SynsetIdentifier -> RDFGen IRI
 synsetIdentifierToIRI (SynsetIdentifier wnIdentifier) = wnIdentifierToIRI "synset" wnIdentifier
 
 synsetToTriples :: Synset Validated -> RDFGen Triples
-synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, frames = synsetFrames} = do
+synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples
+                      , frames = synsetFrames, relations} = do
   lexicographerFileLiteral   <- object lexicographerFileId
   synsetIri                  <- IRISubject <$> synsetIriGen
   lexicographerFilePredicate <- makePredicate "lexicographerFile"
@@ -116,11 +117,18 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, fr
   examplePredicate           <- makePredicate "example"
   exampleLiterals            <- mapM object examples
   containsWordSensePredicate <- makePredicate "containsWordSense"
-  wordSenseObjs              <- fmap (map IRIObject)
-                                  . mapM wordSenseIRI $ wordSenses'
+  wordSenseObjs              <- map IRIObject <$>
+                                  mapM wordSenseIRI wordSenses'
   framePredicate             <- makePredicate "frame"
   frameLiterals              <- mapM object synsetFrames
   wordSenseTriples           <- concat <$> mapM wordSenseToTriples wordSenses'
+  relationPredicates         <- mapM (makePredicate
+                                      . (\(SynsetRelation relationName _) -> relationName))
+                                     relations
+  targetSynsetObjs           <- map IRIObject
+                                  <$> mapM (synsetIdentifierToIRI
+                                            . (\(SynsetRelation _ targetSynsetId) -> targetSynsetId))
+                                           relations
   return . DL.concat $ map DL.fromList [
     [ Triple synsetIri lexicographerFilePredicate lexicographerFileLiteral
     , Triple synsetIri definitionPredicate definitionLiteral ]
@@ -128,6 +136,7 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, fr
     , map (Triple synsetIri containsWordSensePredicate) wordSenseObjs
     , map (Triple synsetIri framePredicate) frameLiterals
     , wordSenseTriples
+    , zipWith (Triple synsetIri) relationPredicates targetSynsetObjs
     ]
   where
     wordSenseIRI (WNWord wordSenseId _ _) = wordSenseIdIRI wordSenseId
@@ -143,9 +152,9 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, fr
       lexicalForm          <- object wordForm
       framePredicate       <- makePredicate "frame"
       frameLiterals        <- mapM object frames
-      pointersIris         <- mapM (makePredicate . (\(WordPointer pointerName _) -> pointerName))
+      pointersPredicates   <- mapM (makePredicate . (\(WordPointer pointerName _) -> pointerName))
                                    pointers
-      targetsIris          <- map IRIObject
+      targetWordSenseObjs  <- map IRIObject
                                 <$> mapM (wordSenseIdIRI
                                           . (\(WordPointer _ targetWordSenseId) -> targetWordSenseId))
                                    pointers
@@ -154,7 +163,7 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples, fr
           Triple wordSenseIri lexicalFormPredicate lexicalForm
         ]
         , map (Triple wordSenseIri framePredicate) frameLiterals
-        , zipWith (Triple wordSenseIri) pointersIris targetsIris
+        , zipWith (Triple wordSenseIri) pointersPredicates targetWordSenseObjs
         ]
   
 
