@@ -43,12 +43,12 @@ newtype SynsetIdentifier =
 type PointerName = Text
 type RelationName = Text
 data WordPointer = WordPointer PointerName WordSenseIdentifier
-  deriving (Show,Eq)
+  deriving (Show,Eq,Ord)
 data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
-  deriving (Show,Eq)
+  deriving (Show,Eq,Ord)
 type FrameIdentifier = Int
 data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
-  deriving (Show,Eq)
+  deriving (Show,Eq,Ord)
 
 newtype SourcePosition = SourcePosition (Int, Int) deriving (Show,Eq,Ord)
 

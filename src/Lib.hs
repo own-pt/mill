@@ -10,9 +10,10 @@ module Lib
 
 import Data (Synset,Unvalidated,Validated)
 import Parse (parseLexicographer)
-import Validate (validateSynsetsInIndex, Validation(..), SourceError, makeIndex
-                , validateSynsets, validation, showSourceError)
-
+import Validate ( validateSynsetsInIndex, Validation(..), makeIndex
+                , validateSynsets, validation, showSourceError, syntaxSourceErrors
+                , SourceValidation)
+----------------------------------
 import Control.Monad (unless,(>>))
 import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
@@ -40,7 +41,7 @@ parseLexicographerFile fileName = do
     Right lexFileSynsets ->
       return $ Right lexFileSynsets
 
-parseLexicographerFiles :: [FilePath] -> IO (Validation [SourceError] [Synset Validated])
+parseLexicographerFiles :: [FilePath] -> IO (SourceValidation [Synset Validated])
 parseLexicographerFiles fileNames = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile fileNames
   case partitionEithers lexFilesSynsetsOrErrors of
@@ -48,7 +49,7 @@ parseLexicographerFiles fileNames = do
       let synsets = concat lexFilesSynsets
           index   = makeIndex synsets
       in return $ validateSynsetsInIndex index
-    _ -> return (Failure [])
+    _ -> return $ Failure syntaxSourceErrors
 
 data Config = Config
   { lexnamesToId :: Map Text Int

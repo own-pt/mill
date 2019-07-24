@@ -2,6 +2,7 @@ module Validate where
 
 import Data
 
+import Data.Bifunctor (Bifunctor(..))
 import Data.List hiding (insert)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
@@ -39,6 +40,10 @@ instance Functor (Validation e) where
   fmap _ (Failure e) = Failure e
   fmap f (Success a) = Success (f a)
 
+instance Bifunctor Validation where
+  bimap f _ (Failure e) = Failure (f e)
+  bimap _ g (Success a) = Success (g a)
+
 instance Semigroup e => Applicative (Validation e) where
   --  pure :: a -> Validation e a
   pure = Success
@@ -53,12 +58,23 @@ validation f _ (Failure e) = f e
 validation _ g (Success a) = g a
 
 data WNError
-  = MissingSynsetRelationTarget SynsetRelation
+  = SyntaxErrors
+  | MissingSynsetRelationTarget SynsetRelation
+  | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | MissingWordRelationTarget WordPointer
-  | UnsortedSynsetWordSenses (NonEmpty WordSenseForm)
+  | UnsortedSynsetWordSenses (NonEmpty (NonEmpty WNWord))
+  | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
   deriving (Show)
 
 data SourceError = SourceError LexicographerFileId SourcePosition WNError deriving (Show)
+
+syntaxSourceErrors :: NonEmpty SourceError
+syntaxSourceErrors = SourceError (LexicographerFileId (N, "placeholder"))
+                                 (SourcePosition (0,0))
+                     SyntaxErrors :| []
+
+type WNValidation a = Validation (NonEmpty WNError) a
+type SourceValidation a = Validation (NonEmpty SourceError) a
 
 showSourceError :: SourceError -> Text
 -- use http://hackage.haskell.org/package/formatting-6.3.7/docs/Formatting.html ?
@@ -69,13 +85,15 @@ showSourceError (SourceError lexicographerFileId (SourcePosition pos) wnError) =
   , showWNError wnError
   ]
   where
+    showWNError SyntaxErrors = "" -- already reported by Megaparsec
     showWNError (MissingSynsetRelationTarget
                  (SynsetRelation relationName synsetId)) =
       T.concat ["Missing ", relationName, " relation target ", showSynsetId synsetId]
+    showWNError (UnsortedSynsetRelations _) = "placeholder"
     showWNError (MissingWordRelationTarget
                  (WordPointer pointerName wordSenseId)) = T.concat ["Missing ", pointerName, " word relation target ", showWordSenseId wordSenseId]
-    showWNError (UnsortedSynsetWordSenses sortedWordSenseForms) = T.concat ["Unsorted list of word senses; order should be ", showWordSenseForms sortedWordSenseForms]
-    showWordSenseForms = T.intercalate ", " . NE.toList . NE.map (\(WordSenseForm wordSenseForm) -> wordSenseForm)
+    showWNError (UnsortedSynsetWordSenses _) = T.concat ["Unsorted word senses; order should be "]
+    showWNError (UnsortedWordPointers _) = "Unsorted word pointers"
     showWordSenseId (WordSenseIdentifier wordSenseIdentifier) = showIdentifier wordSenseIdentifier
     showSynsetId (SynsetIdentifier synsetIdentifier) = showIdentifier synsetIdentifier
     showIdentifier (lexicographerId, WordSenseForm wordForm, LexicalId lexicalId) =
@@ -85,11 +103,12 @@ showSourceError (SourceError lexicographerFileId (SourcePosition pos) wnError) =
       , lexicographerFileIdToText lexicographerId
       ]
 
-checkSynset :: Index a -> Synset Unvalidated -> Validation [SourceError] (Synset Validated)
-checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition, examples, frames, sourcePosition} =
+checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
+checkSynset index Synset{lexicographerFileId, wordSenses, relations
+                        , definition, examples, frames, sourcePosition} =
   case result of
     Success synset -> Success synset
-    Failure errors -> Failure $ map (SourceError lexicographerFileId sourcePosition) errors
+    Failure errors -> Failure $ NE.map (SourceError lexicographerFileId sourcePosition) errors
   where
     result = Synset
       <$> Success sourcePosition
@@ -104,50 +123,69 @@ checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition,
 --- use <*> for validation, or <*? see
 --- https://www.reddit.com/r/haskell/comments/7hqodd/pure_functional_validation/
 
--- [] also check order
+checkSynsetRelations :: Index a -> [SynsetRelation]
+  -> WNValidation [SynsetRelation]
+checkSynsetRelations index synsetRelations =
+  checkSynsetRelationsTargets index synsetRelations
+  *> checkSynsetRelationsOrder synsetRelations
+  *> Success synsetRelations
+
+checkSynsetRelationsOrder :: [SynsetRelation] -> WNValidation [SynsetRelation]
+checkSynsetRelationsOrder synsetRelations = bimap (\errs -> UnsortedSynsetRelations errs :| []) id $ validateSorted synsetRelations
+
 checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
-  -> Validation [WNError] [SynsetRelation]
+  -> WNValidation [SynsetRelation]
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
     checkSynsetRelation synsetRelation@(SynsetRelation _ (SynsetIdentifier (lexFileId, wordForm, lexicalId))) =
       if member targetSenseKey index
       then Success synsetRelation
-      else Failure [MissingSynsetRelationTarget synsetRelation] -- []
+      else Failure (MissingSynsetRelationTarget synsetRelation :| []) -- []
       where
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
-checkWordSenses :: Index a -> NonEmpty WNWord -> Validation [WNError] (NonEmpty WNWord)
-checkWordSenses index wordSenses =
-  checkWordSensesOrder wordSenses <* checkWordSensesPointerTargets index wordSensePointers
-  where
-    wordSensePointers = concatMap (\(WNWord _ _ wordPointers) -> wordPointers) wordSenses
+validateSorted :: Ord a => [a] -> Validation (NonEmpty (NonEmpty a)) [a]
+validateSorted [] = Success []
+validateSorted [x] = Success [x]
+validateSorted (x:y:xt)
+  | x <= y    = (:) <$> Success x <*> validateSorted (y:xt)
+  | otherwise = let (wrongs, rest) = span (< x) xt
+                in (:) <$> Failure ((x:|(y:wrongs)):|[])
+                       <*> validateSorted rest
 
+checkList :: Semigroup e => (b -> Validation e a) -> [b] -> Validation e [a]
+checkList _ []     = Success []
+checkList f (x:xs) = (:) <$> f x <*> checkList f xs
+
+checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
+checkWordSenses index wordSenses =
+  checkWordSensesOrder wordSenses *>
+  checkWordSensesPointerTargets index wordSensesPointers *>
+  validatedWordSensesPointersOrder *>
+  Success wordSenses
+  where
+    wordSensesPointers = concatMap (\(WNWord _ _ wordPointers) -> wordPointers) wordSenses
+    validatedWordSensesPointersOrder = bimap (\errs -> UnsortedWordPointers errs :| []) id
+      $ validateSorted wordSensesPointers
 
 checkWordSensesPointerTargets :: Index a -> [WordPointer]
-  -> Validation [WNError] [WordPointer]
+  -> WNValidation [WordPointer]
 checkWordSensesPointerTargets index = traverse checkWordPointer
   where
     checkWordPointer wordPointer@(WordPointer _ (WordSenseIdentifier (lexFileId, wordForm, lexicalId))) =
       -- check pointer name too
       if member targetSenseKey index
       then Success wordPointer
-      else Failure [MissingWordRelationTarget wordPointer] -- []
+      else Failure (MissingWordRelationTarget wordPointer :| []) -- []
       where
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
-checkWordSensesOrder :: NonEmpty WNWord -> Validation [WNError] (NonEmpty WNWord)
-checkWordSensesOrder wordSenses =
-  if sortedWordForms /= wordForms
-  then Failure [UnsortedSynsetWordSenses sortedWordForms]
-  else Success wordSenses
-  where
-    sortedWordForms = NE.sort wordForms
-    wordForms = NE.map (\(WNWord (WordSenseIdentifier (_, wordForm, _)) _ _) -> wordForm) wordSenses
-
+checkWordSensesOrder :: NonEmpty WNWord -> Validation (NonEmpty WNError) [WNWord]
+checkWordSensesOrder = bimap (\errs -> UnsortedSynsetWordSenses errs :| []) id . validateSorted . NE.toList
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
-validateIndex :: Index (Synset Unvalidated) -> Validation [SourceError] (Index (Synset Validated))
+validateIndex :: Index (Synset Unvalidated) -> SourceValidation (Index (Synset Validated))
 -- [ ] not validating if there are two things with the same reference
 validateIndex index = foldWithKey go (Success empty) index
   where
@@ -157,14 +195,15 @@ validateIndex index = foldWithKey go (Success empty) index
 
 
 validateSynsetsInIndex :: Index (Synset Unvalidated)
-  -> Validation [SourceError] [Synset Validated]
+  -> SourceValidation [Synset Validated]
 validateSynsetsInIndex index = foldWithKey go (Success []) index
   where
     go _ (Left _) result = result
     go _ (Right synset) result = (:) <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
 
-validateSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated] -> Validation [SourceError] [Synset Validated]
+validateSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
+  -> SourceValidation [Synset Validated]
 validateSynsets index = foldr go (Success [])
   where
     go synset result = (:) <$> checkSynset' synset <*> result
