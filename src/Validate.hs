@@ -9,6 +9,8 @@ import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.GenericTrie (Trie, fromList, member, foldWithKey, empty, insert)
+import Formatting (sformat,(%))
+import Formatting.ShortFormatters (st,d)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
@@ -60,9 +62,9 @@ validation _ g (Success a) = g a
 data WNError
   = SyntaxErrors
   | MissingSynsetRelationTarget SynsetRelation
-  | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | MissingWordRelationTarget WordPointer
   | UnsortedSynsetWordSenses (NonEmpty (NonEmpty WNWord))
+  | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
   deriving (Show)
 
@@ -78,30 +80,42 @@ type SourceValidation a = Validation (NonEmpty SourceError) a
 
 showSourceError :: SourceError -> Text
 -- use http://hackage.haskell.org/package/formatting-6.3.7/docs/Formatting.html ?
-showSourceError (SourceError lexicographerFileId (SourcePosition pos) wnError) =
-  T.concat
-  [ lexicographerFileIdToText lexicographerFileId
-  , ":", T.pack $ show pos, ": "
-  , showWNError wnError
-  ]
+showSourceError (SourceError lexicographerFileId (SourcePosition (beg, end)) wnError) =
+  sformat (st % ":" % d % ":" % d % ": " % st)
+    (lexicographerFileIdToText lexicographerFileId)
+    beg end (showWNError wnError)
   where
     showWNError SyntaxErrors = "" -- already reported by Megaparsec
     showWNError (MissingSynsetRelationTarget
                  (SynsetRelation relationName synsetId)) =
-      T.concat ["Missing ", relationName, " relation target ", showSynsetId synsetId]
-    showWNError (UnsortedSynsetRelations _) = "placeholder"
+      showMissingTarget "synset relation" relationName (showSynsetId synsetId)
     showWNError (MissingWordRelationTarget
-                 (WordPointer pointerName wordSenseId)) = T.concat ["Missing ", pointerName, " word relation target ", showWordSenseId wordSenseId]
-    showWNError (UnsortedSynsetWordSenses _) = T.concat ["Unsorted word senses; order should be "]
-    showWNError (UnsortedWordPointers _) = "Unsorted word pointers"
-    showWordSenseId (WordSenseIdentifier wordSenseIdentifier) = showIdentifier wordSenseIdentifier
-    showSynsetId (SynsetIdentifier synsetIdentifier) = showIdentifier synsetIdentifier
+                 (WordPointer pointerName wordSenseId)) =
+      showMissingTarget "word pointer" pointerName (showWordSenseId wordSenseId)
+    showWNError (UnsortedSynsetRelations sequences) =
+      showUnordered "synset relations" sequences
+
+    showWNError (UnsortedSynsetWordSenses sequences) =
+      showUnordered "synset word senses" sequences
+    showWNError (UnsortedWordPointers sequences) =
+      showUnordered "word pointers" sequences
+    --
+    showWordSenseId (WordSenseIdentifier wordSenseIdentifier) =
+      showIdentifier wordSenseIdentifier
+    showSynsetId (SynsetIdentifier synsetIdentifier) =
+      showIdentifier synsetIdentifier
     showIdentifier (lexicographerId, WordSenseForm wordForm, LexicalId lexicalId) =
-      T.concat
-      [ wordForm, ":"
-      , T.pack . show $ lexicalId, " at file "
-      , lexicographerFileIdToText lexicographerId
-      ]
+      sformat (st % ":" % d % " at file " % st)
+              wordForm lexicalId (lexicographerFileIdToText lexicographerId)
+    showMissingTarget relationType relationName =
+      sformat ("Missing " % st % " " % st % " target " % st)
+              relationName relationType
+    showUnordered what sequences =
+      sformat ("Unsorted " % st % " ; " % st) what
+              (T.intercalate " ; " . map showUnorderedSequence $ NE.toList sequences)
+    showUnorderedSequence (x:|xs) =
+      sformat (st % " should come after " % st)
+              (T.pack . show $ x) (T.intercalate ", " $ map (T.pack . show) xs)
 
 checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
 checkSynset index Synset{lexicographerFileId, wordSenses, relations
@@ -153,10 +167,6 @@ validateSorted (x:y:xt)
                 in (:) <$> Failure ((x:|(y:wrongs)):|[])
                        <*> validateSorted rest
 
-checkList :: Semigroup e => (b -> Validation e a) -> [b] -> Validation e [a]
-checkList _ []     = Success []
-checkList f (x:xs) = (:) <$> f x <*> checkList f xs
-
 checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
 checkWordSenses index wordSenses =
   checkWordSensesOrder wordSenses *>
@@ -181,7 +191,8 @@ checkWordSensesPointerTargets index = traverse checkWordPointer
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
 checkWordSensesOrder :: NonEmpty WNWord -> Validation (NonEmpty WNError) [WNWord]
-checkWordSensesOrder = bimap (\errs -> UnsortedSynsetWordSenses errs :| []) id . validateSorted . NE.toList
+checkWordSensesOrder = bimap (\errs -> UnsortedSynsetWordSenses errs :| []) id
+  . validateSorted . NE.toList
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
