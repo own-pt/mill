@@ -17,7 +17,8 @@ wn30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
                 , required=True)
 @click.argument('output_dir', type=click.Path(file_okay=False, resolve_path=True, writable=True)
                 , required=True)
-@click.option('-f', '--rdf-file-format', 'rdf_file_format', type=click.STRING, help = "Type of RDF input file. Must be accepted by RDFlib.")
+@click.option('-f', '--rdf-file-format', 'rdf_file_format', type=click.STRING, default='nt', show_default=True
+              , help = "Type of RDF input file. Must be accepted by RDFlib.")
 def main (rdf_file, config_dir, output_dir, rdf_file_format="nt"):
     (synset_relations, word_relations, frames_to_id) = read_config(config_dir)
     graph = Graph()
@@ -77,7 +78,7 @@ def print_graph(graph, synset_relations, word_relations, frames_to_id, output_di
         print_lexfile(graph, lexicographerFile, synset_relations,
                       word_relations, frames_to_id, output_dir)
 
-def sort_word_senses(synset):
+def sort_word_senses(graph, synset):
     return sorted(graph.objects(synset, wn30["containsWordSense"]),
                   key=lambda ws: graph.value(graph.value(ws, wn30["word"]),
                                              wn30["lexicalForm"]))
@@ -85,7 +86,7 @@ def sort_word_senses(synset):
 def print_lexfile(graph, lexicographer_file, synset_relations,
                   word_relations, frames_to_id, output_dir):
     def sort_synsets(synsets):
-        synsets_word_senses = map(lambda ss: (ss, sort_word_senses(ss)), synsets)
+        synsets_word_senses = map(lambda ss: (ss, sort_word_senses(graph, ss)), synsets)
         return sorted(synsets_word_senses, key=lambda i : i[1])
     with open(os.path.join(output_dir, lexicographer_file), 'w') as output_stream:
         write = lambda data, *args, **kwargs: print(data, file=output_stream,
@@ -126,7 +127,7 @@ def print_synset(graph, synset, sorted_word_senses, lexicographerFile, synset_re
                 rels.append("{}: {}".format(predicate_txt_name,
                                             word_sense_id(graph, lexicographerFile,
                                                           # first word sense is head
-                                                          sort_word_senses(obj)[0])))
+                                                          sort_word_senses(graph, obj)[0])))
         rels.sort()
         for relation in rels:
             write(relation)
