@@ -31,7 +31,7 @@ parseValidateCommand :: Parser Command
 parseValidateCommand = Validate <$> validateParser
   where
     validateParser = argument str
-      (metavar "PATH" <> help "Validates one lexicographer file in case PATH is a file, else validates all lexicographer files in directory")
+      (metavar "PATH" <> help "Validates one lexicographer file in case PATH is a file, else validates all lexicographer files in directory. Assumes lexnames.tsv is in the same PATH")
 
 parseExportCommand :: Parser Command
 parseExportCommand = ExportCommand <$> lexDirectory <*> outputFile

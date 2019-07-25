@@ -19,7 +19,7 @@ import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
 import Data.Either
 import Data.Functor(($>),void)
-import Data.List (partition, intercalate)
+import Data.List (partition)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
@@ -30,7 +30,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Read as TR
 import System.Directory (doesDirectoryExist)
-import System.FilePath ((</>), takeDirectory)
+import System.FilePath ((</>), takeDirectory,normalise,equalFilePath)
 
 
 parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
@@ -92,7 +92,7 @@ lexicographerFilesInDirectory filesDirectory = do
   if doesDirectoryExist'
     then do
       Config{lexnamesToId} <- readConfig filesDirectory
-      let lexnames = map (go .fst)
+      let lexnames = map (normalise . go . fst)
                        $ M.toList lexnamesToId
       return lexnames
     else
@@ -101,12 +101,13 @@ lexicographerFilesInDirectory filesDirectory = do
     go lexFileId = filesDirectory </> T.unpack lexFileId
     
 validateLexicographerFile :: FilePath -> IO ()
-validateLexicographerFile fileName = do
-  lexicographerFiles <- lexicographerFilesInDirectory $ takeDirectory fileName
-  case partition (fileName ==) lexicographerFiles of
+validateLexicographerFile filePath = do
+  let normalFilePath = normalise filePath
+  lexicographerFiles <- lexicographerFilesInDirectory $ takeDirectory normalFilePath
+  case partition (equalFilePath normalFilePath) lexicographerFiles of
     ([fileToValidate], otherLexicographerFiles) -> go fileToValidate otherLexicographerFiles
-    ([], lexFiles) -> putStrLn $ "File " ++ fileName ++ " is not among files"  ++ intercalate "," lexFiles ++ "lexnames.tsv"
-    _       -> putStrLn $ "File " ++ fileName ++ " is doubly specified in lexnames.tsv"
+    ([], lexFiles) -> go normalFilePath lexFiles
+    _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
     go fileToValidate otherFiles = do
       lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
