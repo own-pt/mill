@@ -37,7 +37,7 @@ TSV format.
 
 * Features
 ** RDF -> text
-Run =wn2text.py --help=. This directory contains the necessary
+Run =wn2text.py --help=. This repository contains the necessary
 configuration files, and you can download the input RDF file from
 https://github.com/own-pt/openWordnet-PT.
 
