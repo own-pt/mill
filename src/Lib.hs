@@ -11,7 +11,7 @@ module Lib
 import Data (Synset,Unvalidated,Validated)
 import Parse (parseLexicographer)
 import Validate ( validateSynsetsInIndex, Validation(..), makeIndex
-                , validateSynsets, validation, showSourceError, syntaxSourceErrors
+                , validateSynsets, syntaxSourceErrors
                 , SourceValidation)
 ----------------------------------
 import Control.Monad (unless,(>>))
@@ -31,6 +31,8 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Text.Read as TR
 import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>), takeDirectory,normalise,equalFilePath)
+import Data.Text.Prettyprint.Doc (Pretty(..))
+import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 
 
 parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
@@ -99,6 +101,10 @@ lexicographerFilesInDirectory filesDirectory = do
     putStrLn ("Directory " ++ filesDirectory ++ "does not exist.") >> return []
   where
     go lexFileId = filesDirectory </> T.unpack lexFileId
+
+printValidation :: SourceValidation [Synset Validated] -> IO ()
+printValidation (Failure errors) = mapM_ (putDoc . pretty) errors
+printValidation _ = return ()
     
 validateLexicographerFile :: FilePath -> IO ()
 validateLexicographerFile filePath = do
@@ -115,8 +121,7 @@ validateLexicographerFile filePath = do
         ([], lexFilesSynsets@(synsetsToValidate:_)) ->
           let synsets = concat lexFilesSynsets
               index   = makeIndex synsets
-          in validation (mapM_ (TIO.putStrLn . showSourceError)) (void . return)
-             $ validateSynsets index synsetsToValidate
+          in printValidation $ validateSynsets index synsetsToValidate
         _ -> return ()
 
 validateLexicographerFiles :: FilePath -> IO ()
@@ -127,8 +132,7 @@ validateLexicographerFiles filesDirectory = do
     ([], lexfilesSynsets) ->
       let synsets = concat lexfilesSynsets
           index = makeIndex synsets
-          in validation (mapM_ (TIO.putStrLn . showSourceError)) (void . return)
-               $ validateSynsets index synsets
+          in printValidation $ validateSynsets index synsets
     _ -> return ()
 
 

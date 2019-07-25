@@ -40,7 +40,6 @@ dependencies:
 - dlist == 0.8.*
 - binary == 0.8.*
 - optparse-applicative >= 0.14 && < 1
-- formatting == 6.*
 - prettyprinter == 1.*
 
 library:

@@ -14,7 +14,7 @@ import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
                        IRI(..), Triple(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc (Pretty(..),Doc,dot,colon)
+import Data.Text.Prettyprint.Doc (Pretty(..),Doc,dot,colon,(<+>))
 
 
 data WNPOS = N | V | R | A | S deriving (Show,Eq,Enum,Ord)
@@ -83,10 +83,10 @@ instance Pretty LexicographerFileId where
 
 prettyIdentifier :: (LexicographerFileId, WordSenseForm, LexicalId) -> Doc ann
 prettyIdentifier (lexicographerFileId, wordSenseForm, lexicalId)
-  =  pretty lexicographerFileId
-  <> colon
-  <> pretty wordSenseForm
-  <> pretty lexicalId
+  =   pretty lexicographerFileId
+  <>  colon
+  <>  pretty wordSenseForm
+  <+> pretty lexicalId
 
 instance Pretty WordSenseIdentifier where
   pretty (WordSenseIdentifier wnIdentifier) = prettyIdentifier wnIdentifier
@@ -95,7 +95,7 @@ instance Pretty SynsetIdentifier where
   pretty (SynsetIdentifier wnIdentifier) = prettyIdentifier wnIdentifier
 
 prettyRelation :: Text -> (LexicographerFileId, WordSenseForm, LexicalId) -> Doc ann
-prettyRelation name wnIdentifier = pretty name <> pretty wnIdentifier
+prettyRelation name wnIdentifier = pretty name <> "»" <> prettyIdentifier wnIdentifier
 
 instance Pretty WordPointer where
   pretty (WordPointer pointerName (WordSenseIdentifier wnIdentifier))

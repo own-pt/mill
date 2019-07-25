@@ -9,8 +9,9 @@ import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.GenericTrie (Trie, fromList, member, foldWithKey, empty, insert)
-import Formatting (sformat,(%))
-import Formatting.ShortFormatters (st,d)
+import Data.Text.Prettyprint.Doc
+  ( Pretty(..),Doc,(<+>), colon, align, hsep
+  , emptyDoc, line, indent, vsep)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
@@ -27,8 +28,8 @@ makeIndex synsets = fromList keyValuePairs
         (headSenseKey, Right synset) : map (\wordSense -> (wordSenseKey wordSense, Left headSenseKey)) wordSenses
 
 wordSenseKey :: WNWord -> String
-wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _) =
-  senseKey lexicographerFileId wordForm lexicalId
+wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _)
+  = senseKey lexicographerFileId wordForm lexicalId
 
 senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 -- [ ] this is not really a sense key
@@ -55,10 +56,6 @@ instance Semigroup e => Applicative (Validation e) where
   Failure e <*> Success _  = Failure e
   Failure e <*> Failure e' = Failure (e <> e')
 
-validation :: (e -> b) -> (a -> b) -> Validation e a -> b
-validation f _ (Failure e) = f e
-validation _ g (Success a) = g a
-
 data WNError
   = SyntaxErrors
   | MissingSynsetRelationTarget SynsetRelation
@@ -78,45 +75,44 @@ syntaxSourceErrors = SourceError (LexicographerFileId (N, "placeholder"))
 type WNValidation a = Validation (NonEmpty WNError) a
 type SourceValidation a = Validation (NonEmpty SourceError) a
 
-showSourceError :: SourceError -> Text
--- use http://hackage.haskell.org/package/formatting-6.3.7/docs/Formatting.html ?
-showSourceError (SourceError lexicographerFileId (SourcePosition (beg, end)) wnError) =
-  sformat (st % ":" % d % ":" % d % ": " % st)
-    (lexicographerFileIdToText lexicographerFileId)
-    beg end (showWNError wnError)
+---
+-- Pretty instances
+prettyMissingTarget :: Text -> Text -> Doc ann -> Doc ann
+prettyMissingTarget relationType relationName target
+  =   "Missing"
+  <+> pretty relationType
+  <+> pretty relationName
+  <+> "target" <+> target
+
+prettyUnordered :: Pretty a => Text -> NonEmpty (NonEmpty a) -> Doc ann
+prettyUnordered what sequences
+  = "Unsorted" <+> pretty what <> line
+  <> (indent 2 . align . vsep . map prettyUnorderedSequence $ NE.toList sequences)
   where
-    showWNError SyntaxErrors = "" -- already reported by Megaparsec
-    showWNError (MissingSynsetRelationTarget
-                 (SynsetRelation relationName synsetId)) =
-      showMissingTarget "synset relation" relationName (showSynsetId synsetId)
-    showWNError (MissingWordRelationTarget
-                 (WordPointer pointerName wordSenseId)) =
-      showMissingTarget "word pointer" pointerName (showWordSenseId wordSenseId)
-    showWNError (UnsortedSynsetRelations sequences) =
-      showUnordered "synset relations" sequences
+    prettyUnorderedSequence (x:|xs) =
+      pretty x <+> "should come after" <+> hsep (map pretty xs)
+  
+instance Pretty WNError where
+  pretty SyntaxErrors = emptyDoc
+  pretty (MissingSynsetRelationTarget (SynsetRelation relationName target))
+    = prettyMissingTarget "synset relation" relationName $ pretty target
+  pretty (MissingWordRelationTarget (WordPointer pointerName target))
+    = prettyMissingTarget "word pointer" pointerName $ pretty target
+  pretty (UnsortedSynsetRelations sequences)
+    = prettyUnordered "synset relations" sequences
+  pretty (UnsortedSynsetWordSenses sequences)
+    = prettyUnordered "synset word senses" sequences
+  pretty (UnsortedWordPointers sequences)
+    = prettyUnordered "word pointers" sequences
 
-    showWNError (UnsortedSynsetWordSenses sequences) =
-      showUnordered "synset word senses" sequences
-    showWNError (UnsortedWordPointers sequences) =
-      showUnordered "word pointers" sequences
-    --
-    showWordSenseId (WordSenseIdentifier wordSenseIdentifier) =
-      showIdentifier wordSenseIdentifier
-    showSynsetId (SynsetIdentifier synsetIdentifier) =
-      showIdentifier synsetIdentifier
-    showIdentifier (lexicographerId, WordSenseForm wordForm, LexicalId lexicalId) =
-      sformat (st % ":" % d % " at file " % st)
-              wordForm lexicalId (lexicographerFileIdToText lexicographerId)
-    showMissingTarget relationType relationName =
-      sformat ("Missing " % st % " " % st % " target " % st)
-              relationName relationType
-    showUnordered what sequences =
-      sformat ("Unsorted " % st % " ; " % st) what
-              (T.intercalate " ; " . map showUnorderedSequence $ NE.toList sequences)
-    showUnorderedSequence (x:|xs) =
-      sformat (st % " should come after " % st)
-              (T.pack . show $ x) (T.intercalate ", " $ map (T.pack . show) xs)
+instance Pretty SourceError where
+  pretty (SourceError lexicographerFileId (SourcePosition (beg, end)) wnError)
+    =   pretty lexicographerFileId
+    <>  colon <> pretty beg <> colon <> pretty end <> colon
+    <+> pretty wnError <> line
 
+---
+-- checks
 checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
 checkSynset index Synset{lexicographerFileId, wordSenses, relations
                         , definition, examples, frames, sourcePosition} =
@@ -145,7 +141,9 @@ checkSynsetRelations index synsetRelations =
   *> Success synsetRelations
 
 checkSynsetRelationsOrder :: [SynsetRelation] -> WNValidation [SynsetRelation]
-checkSynsetRelationsOrder synsetRelations = bimap (\errs -> UnsortedSynsetRelations errs :| []) id $ validateSorted synsetRelations
+checkSynsetRelationsOrder synsetRelations
+  = bimap (\errs -> UnsortedSynsetRelations errs :| []) id
+  $ validateSorted synsetRelations
 
 checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
@@ -190,7 +188,7 @@ checkWordSensesPointerTargets index = traverse checkWordPointer
       where
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
-checkWordSensesOrder :: NonEmpty WNWord -> Validation (NonEmpty WNError) [WNWord]
+checkWordSensesOrder :: NonEmpty WNWord -> WNValidation [WNWord]
 checkWordSensesOrder = bimap (\errs -> UnsortedSynsetWordSenses errs :| []) id
   . validateSorted . NE.toList
 
