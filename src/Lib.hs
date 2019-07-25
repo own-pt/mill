@@ -34,16 +34,16 @@ import System.FilePath ((</>), takeDirectory,normalise,equalFilePath)
 
 
 parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
-parseLexicographerFile fileName = do
-  content <- TIO.readFile fileName
-  case parseLexicographer fileName content of
+parseLexicographerFile filePath = do
+  content <- TIO.readFile $ normalise filePath
+  case parseLexicographer filePath content of
     Left err -> putStr err $> Left ()
     Right lexFileSynsets ->
       return $ Right lexFileSynsets
 
 parseLexicographerFiles :: [FilePath] -> IO (SourceValidation [Synset Validated])
-parseLexicographerFiles fileNames = do
-  lexFilesSynsetsOrErrors <- mapM parseLexicographerFile fileNames
+parseLexicographerFiles filePaths = do
+  lexFilesSynsetsOrErrors <- mapM parseLexicographerFile filePaths
   case partitionEithers lexFilesSynsetsOrErrors of
     ([], lexFilesSynsets) ->
       let synsets = concat lexFilesSynsets
