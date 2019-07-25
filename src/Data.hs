@@ -7,21 +7,23 @@ module Data where
 import Control.Monad.Trans.Reader (ask)
 import qualified Data.DList as DL
 import qualified Data.List.NonEmpty as NE
-import Data.List.NonEmpty(NonEmpty)
+import Data.List.NonEmpty(NonEmpty(..))
 import Data.Monoid (Endo(..))
 import Data.RDF.ToRDF (ToRDF(..),ToObject(..), RDFGen, appBaseIRI,Triples)
 import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
                        IRI(..), Triple(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Prettyprint.Doc (Pretty(..),Doc,dot,colon)
 
 
 data WNPOS = N | V | R | A | S deriving (Show,Eq,Enum,Ord)
+
 newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Show,Eq,Ord)
 
-newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord, ToObject)
+newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord,Pretty,ToObject)
 
-newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord,ToObject)
+newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord,Pretty,ToObject)
 
 newtype WordSenseIdentifier =
   WordSenseIdentifier ( LexicographerFileId
@@ -52,7 +54,7 @@ data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
 
 newtype SourcePosition = SourcePosition (Int, Int) deriving (Show,Eq,Ord)
 
--- synsets can be 
+-- synsets can be
 data Unvalidated
 data Validated
 
@@ -65,6 +67,50 @@ data Synset a = Synset
   , frames               :: [Int]
   , relations            :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
   } deriving (Show,Eq)
+
+
+--- Pretty instances
+instance Pretty WNPOS where
+  pretty N = "noun"
+  pretty V = "verb"
+  pretty R = "adv"
+  pretty A = "adj"
+  pretty S = "adj"
+
+instance Pretty LexicographerFileId where
+  pretty (LexicographerFileId (wnPOS, lexicographerName)) =
+    pretty wnPOS <> dot <> pretty lexicographerName
+
+prettyIdentifier :: (LexicographerFileId, WordSenseForm, LexicalId) -> Doc ann
+prettyIdentifier (lexicographerFileId, wordSenseForm, lexicalId)
+  =  pretty lexicographerFileId
+  <> colon
+  <> pretty wordSenseForm
+  <> pretty lexicalId
+
+instance Pretty WordSenseIdentifier where
+  pretty (WordSenseIdentifier wnIdentifier) = prettyIdentifier wnIdentifier
+
+instance Pretty SynsetIdentifier where
+  pretty (SynsetIdentifier wnIdentifier) = prettyIdentifier wnIdentifier
+
+prettyRelation :: Text -> (LexicographerFileId, WordSenseForm, LexicalId) -> Doc ann
+prettyRelation name wnIdentifier = pretty name <> pretty wnIdentifier
+
+instance Pretty WordPointer where
+  pretty (WordPointer pointerName (WordSenseIdentifier wnIdentifier))
+    = prettyRelation pointerName wnIdentifier
+
+instance Pretty SynsetRelation where
+  pretty (SynsetRelation relationName (SynsetIdentifier wnIdentifier))
+    = prettyRelation relationName wnIdentifier
+
+instance Pretty WNWord where
+  pretty (WNWord (WordSenseIdentifier wnIdentifier) _ _)
+    = prettyIdentifier wnIdentifier
+
+instance Pretty (Synset a) where
+  pretty Synset{wordSenses = wordSense:|_} = pretty wordSense
 
 ---
 -- to RDF instances
@@ -89,7 +135,7 @@ lexicographerFileIdFromText = go . T.breakOn "."
     go ("adjs",name) = wrap S name
     go ("adv",name)  = wrap R name
     go _             = Nothing
-    
+
 instance ToObject LexicographerFileId where
   object lexicographerFileId = pure . LiteralObject $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
 
@@ -165,9 +211,7 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples
         , map (Triple wordSenseIri framePredicate) frameLiterals
         , zipWith (Triple wordSenseIri) pointersPredicates targetWordSenseObjs
         ]
-  
+
 
 instance ToRDF (Synset Validated) where
    triples = synsetToTriples
-
-

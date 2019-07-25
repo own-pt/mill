@@ -19,7 +19,7 @@ import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
 import Data.Either
 import Data.Functor(($>),void)
-import Data.List (partition)
+import Data.List (partition, intercalate)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
@@ -105,7 +105,7 @@ validateLexicographerFile fileName = do
   lexicographerFiles <- lexicographerFilesInDirectory $ takeDirectory fileName
   case partition (fileName ==) lexicographerFiles of
     ([fileToValidate], otherLexicographerFiles) -> go fileToValidate otherLexicographerFiles
-    ([], _) -> putStrLn $ "File " ++ fileName ++ " is not specified in lexnames.tsv"
+    ([], lexFiles) -> putStrLn $ "File " ++ fileName ++ " is not among files"  ++ intercalate "," lexFiles ++ "lexnames.tsv"
     _       -> putStrLn $ "File " ++ fileName ++ " is doubly specified in lexnames.tsv"
   where
     go fileToValidate otherFiles = do
