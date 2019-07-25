@@ -60,6 +60,7 @@ data WNError
   = SyntaxErrors
   | MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
+  | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
   | UnsortedSynsetWordSenses (NonEmpty (NonEmpty WNWord))
   | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
@@ -98,6 +99,8 @@ instance Pretty WNError where
     = prettyMissingTarget "synset relation" relationName $ pretty target
   pretty (MissingWordRelationTarget (WordPointer pointerName target))
     = prettyMissingTarget "word pointer" pointerName $ pretty target
+  pretty (UnsortedSynsets sequences)
+    = prettyUnordered "synsets" sequences
   pretty (UnsortedSynsetRelations sequences)
     = prettyUnordered "synset relations" sequences
   pretty (UnsortedSynsetWordSenses sequences)
@@ -135,8 +138,8 @@ checkSynset index Synset{lexicographerFileId, wordSenses, relations
 
 checkSynsetRelations :: Index a -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
-checkSynsetRelations index synsetRelations =
-  checkSynsetRelationsTargets index synsetRelations
+checkSynsetRelations index synsetRelations
+  =  checkSynsetRelationsTargets index synsetRelations
   *> checkSynsetRelationsOrder synsetRelations
   *> Success synsetRelations
 
@@ -157,13 +160,16 @@ checkSynsetRelationsTargets index = traverse checkSynsetRelation
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
 validateSorted :: Ord a => [a] -> Validation (NonEmpty (NonEmpty a)) [a]
+-- maybe just sort input instead of picking some of the errors?
+--- or maybe just check if every pair is sorted, which will be faster
+--- but might take more iterations to find all errors
 validateSorted [] = Success []
 validateSorted [x] = Success [x]
 validateSorted (x:y:xt)
   | x <= y    = (:) <$> Success x <*> validateSorted (y:xt)
-  | otherwise = let (wrongs, rest) = span (< x) xt
+  | otherwise = let (wrongs, _) = span (< x) xt
                 in (:) <$> Failure ((x:|(y:wrongs)):|[])
-                       <*> validateSorted rest
+                       <*> validateSorted (y:xt)
 
 checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
 checkWordSenses index wordSenses =
@@ -213,8 +219,16 @@ validateSynsetsInIndex index = foldWithKey go (Success []) index
 
 validateSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
   -> SourceValidation [Synset Validated]
-validateSynsets index = foldr go (Success [])
+validateSynsets index synsets =
+  checkSynsetsOrder checkedSynsets
   where
+    checkSynsetsOrder (Success validatedSynsets)
+      = bimap (NE.map toSourceError) id $ validateSorted validatedSynsets
+    checkSynsetsOrder (Failure es) = Failure es
+    toSourceError errs@(Synset{sourcePosition, lexicographerFileId} :| _)
+      = SourceError lexicographerFileId sourcePosition
+          (UnsortedSynsets (errs :| []))
+    checkedSynsets = foldr go (Success []) synsets
     go synset result = (:) <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
 

@@ -68,6 +68,10 @@ data Synset a = Synset
   , relations            :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
   } deriving (Show,Eq)
 
+instance Ord (Synset Validated) where
+  Synset{wordSenses = (headWord:|_)} <= Synset{wordSenses = (headWord2:|_)}
+    = headWord <= headWord2
+  
 
 --- Pretty instances
 instance Pretty WNPOS where
