@@ -43,22 +43,30 @@
                       ;; Parse the output buffer for diagnostic's
                       ;; messages and locations, collect them in a list
                       ;; of objects, and call `report-fn'.
-                      (cl-loop
-                       while (search-forward-regexp
-                              "^\\(.*\\):\\([0-9]+\\):\\([0-9]+\\): \\(.*\\)$"
-                              nil t)
-                       for msg = (match-string 4)
-                       for end = (string-to-number (match-string 3))
-		       for beg = (string-to-number (match-string 2))
-                       for type = :warning
-                       collect (flymake-make-diagnostic source
-                                                        beg
-                                                        end
-                                                        type
-                                                        msg)
-                       into diags
-                       finally
-		       (funcall report-fn diags)))
+                      (let
+			  ((file-name-match '(submatch (one-or-more nonl)))
+			   (beg-match '(submatch (one-or-more digit)))
+			   (end-match '(submatch (one-or-more digit)))
+			   (msg-match '(submatch (one-or-more nonl) (zero-or-more "\n")
+						 (zero-or-more "  " (one-or-more nonl) "\n"))))
+			
+			(cl-loop
+			 while (search-forward-regexp
+				(rx-to-string
+				 `(and ,file-name-match ":" ,beg-match ":" ,end-match ,msg-match))
+				nil t)
+			 for msg = (match-string 4)
+			 for end = (string-to-number (match-string 3))
+			 for beg = (string-to-number (match-string 2))
+			 for type = :error
+			 collect (flymake-make-diagnostic source
+                                                          beg
+                                                          end
+                                                          type
+                                                          msg)
+			 into diags
+			 finally
+			 (funcall report-fn diags))))
                   (flymake-log :warning "Canceling obsolete check %s"
                                proc))
               ;; Cleanup the temporary buffer used to hold the
