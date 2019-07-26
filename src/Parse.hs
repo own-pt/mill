@@ -1,4 +1,4 @@
-module Parse where
+module Parse (parseLexicographer) where
 
 import Data
 
@@ -13,7 +13,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
 import Text.Megaparsec hiding (State)
-import Text.Megaparsec.Char (char, spaceChar, string, eol)
+import Text.Megaparsec.Char (char, string, eol)
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 
@@ -82,7 +82,7 @@ synset = do
   startOffset      <- getOffset
   lexicographerId  <- get
   synsetWordSenses <- wordSenseStatement `NC.endBy1` linebreak
-  synsetDefinition <-  definitionStatement <* linebreak
+  synsetDefinition <- definitionStatement <* linebreak
   synsetExamples   <- exampleStatement `endBy` linebreak
   synsetFrames     <- option [] (framesStatement <* linebreak)
   synsetRelations  <- synsetRelationStatement `endBy` linebreak
@@ -162,9 +162,6 @@ framesStatement = statement "fs" frameNumbers
 
 frameNumbers :: Parser [Int]
 frameNumbers = some (integer <?> "Frame number")
-
-whiteSpaceConsumer :: Parser ()
-whiteSpaceConsumer = L.space (void spaceChar) empty empty
 
 lineText :: Parser Text
 lineText = T.stripEnd <$> takeWhileP Nothing (/= '\n')

@@ -1,4 +1,11 @@
-module Validate where
+module Validate
+  ( validateSynsets
+  , validateSynsetsInIndex
+  , makeIndex
+  , Validation(..)
+  , SourceValidation
+  , syntaxSourceErrors
+  ) where
 
 import Data
 
@@ -69,6 +76,7 @@ data WNError
 data SourceError = SourceError LexicographerFileId SourcePosition WNError deriving (Show)
 
 syntaxSourceErrors :: NonEmpty SourceError
+-- this is wrong
 syntaxSourceErrors = SourceError (LexicographerFileId (N, "placeholder"))
                                  (SourcePosition (0,0))
                      SyntaxErrors :| []
@@ -211,7 +219,7 @@ validateIndex :: Index (Synset Unvalidated) -> SourceValidation (Index (Synset V
 validateIndex index = foldWithKey go (Success empty) index
   where
     go key (Left headWordKey) result = insert key (Left headWordKey) <$> result
-    go key (Right synset) result = insert key . Right <$> checkSynset' synset <*> result
+    go key (Right synset)     result = insert key . Right <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
 
 

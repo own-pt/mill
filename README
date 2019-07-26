@@ -49,6 +49,14 @@ see
 see
 : mill validate --help
 
+Notice that validation occurs in steps; some validation steps can only
+be performed after the previous ones have completed without
+errors. This may cause an increase in the number of errors after
+errors are fixed (these errors were already there but were only
+detected after the previous validation step was performed). For
+example, we only check if synsets are sorted after checking that their
+words are themselves sorted (if they are not, there's not point in
+checking if the synsets are sorted).
 
 * Why the name mill?
 =mill= aims to fulfill the same role that =grind= once did. It's been
