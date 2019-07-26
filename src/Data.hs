@@ -17,7 +17,7 @@ import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc (Pretty(..),Doc,dot,colon,(<+>))
 
 
-data WNPOS = N | V | R | A | S deriving (Show,Eq,Enum,Ord)
+data WNPOS = A | S | R | N | V deriving (Show,Eq,Enum,Ord)
 
 newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Show,Eq,Ord)
 

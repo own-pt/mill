@@ -130,7 +130,7 @@ checkSynset index Synset{lexicographerFileId, wordSenses, relations
       <*> Success definition
       <*> Success examples
       <*> Success frames -- [ ] check frames
-      <*> checkSynsetRelationsTargets index relations
+      <*> checkSynsetRelations index relations
 
 
 --- use <*> for validation, or <*? see
@@ -172,19 +172,25 @@ validateSorted (x:y:xt)
                        <*> validateSorted (y:xt)
 
 checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
-checkWordSenses index wordSenses =
-  checkWordSensesOrder wordSenses *>
-  checkWordSensesPointerTargets index wordSensesPointers *>
-  validatedWordSensesPointersOrder *>
-  Success wordSenses
-  where
-    wordSensesPointers = concatMap (\(WNWord _ _ wordPointers) -> wordPointers) wordSenses
-    validatedWordSensesPointersOrder = bimap (\errs -> UnsortedWordPointers errs :| []) id
-      $ validateSorted wordSensesPointers
+checkWordSenses index wordSenses
+  =  checkWordSensesOrder wordSenses
+  *> traverse (checkWordSense index) wordSenses
+  *> Success wordSenses
 
-checkWordSensesPointerTargets :: Index a -> [WordPointer]
+checkWordSense :: Index a -> WNWord -> WNValidation WNWord
+checkWordSense index wordSense@(WNWord _ _ wordPointers)
+  =  checkWordSensePointersOrder
+  *> checkWordSensePointersTargets index wordPointers
+  *> Success wordSense
+  where
+    checkWordSensePointersOrder =
+      bimap (\errs -> UnsortedWordPointers errs :| []) id
+      $ validateSorted wordPointers
+    
+
+checkWordSensePointersTargets :: Index a -> [WordPointer]
   -> WNValidation [WordPointer]
-checkWordSensesPointerTargets index = traverse checkWordPointer
+checkWordSensePointersTargets index = traverse checkWordPointer
   where
     checkWordPointer wordPointer@(WordPointer _ (WordSenseIdentifier (lexFileId, wordForm, lexicalId))) =
       -- check pointer name too

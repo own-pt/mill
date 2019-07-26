@@ -82,22 +82,21 @@ def sort_word_senses(graph, synset):
     return sorted(graph.objects(synset, wn30["containsWordSense"]),
                   key=lambda ws: graph.value(graph.value(ws, wn30["word"]),
                                              wn30["lexicalForm"]))
-
+def sort_synsets(graph, synsets):
+    synsets_word_senses = map(lambda ss: (ss, sort_word_senses(graph, ss)), synsets)
+    return sorted(synsets_word_senses, key=lambda i : word_sense_id(graph, "", i[1][0]))
+    
 def print_lexfile(graph, lexicographer_file, synset_relations,
                   word_relations, frames_to_id, output_dir):
-    def sort_synsets(synsets):
-        synsets_word_senses = map(lambda ss: (ss, sort_word_senses(graph, ss)), synsets)
-        return sorted(synsets_word_senses, key=lambda i : i[1])
     with open(os.path.join(output_dir, lexicographer_file), 'w') as output_stream:
         write = lambda data, *args, **kwargs: print(data, file=output_stream,
                                                     *args, **kwargs)
         pos, lexname = lexicographer_file.split(".")
         write("{}.{}".format(pos, lexname), end="\n\n")
         synsets = graph.subjects(wn30['lexicographerFile'], lexicographer_file)
-        for synset, sorted_word_senses in sort_synsets(synsets):
+        for synset, sorted_word_senses in sort_synsets(graph, synsets):
             print_synset(graph, synset, sorted_word_senses, lexicographer_file,
                          synset_relations, word_relations, frames_to_id, write)
-
 
 def word_sense_id(graph, lexicographer_file, word_sense):
     word = graph.value(word_sense, wn30["word"])
@@ -106,17 +105,24 @@ def word_sense_id(graph, lexicographer_file, word_sense):
     in_synset = graph.value(predicate=wn30["containsWordSense"], object=word_sense)
     in_lexfile = graph.value(subject=in_synset, predicate=wn30["lexicographerFile"])
     if None not in (word, word_form, lexical_id, in_synset, in_lexfile):
-        return "{}{}{}".format("{}:".format(in_lexfile)
+        return (in_lexfile, word_form, int(lexical_id))
+    else:
+        raise "Error: missing wordsense information"
+
+def print_word_sense_id(wordsense_id, lexicographer_file=None):
+    (in_lexfile, word_form, lexical_id) = wordsense_id
+    return "{}{}{}".format("{}:".format(in_lexfile)
                                if in_lexfile.neq(lexicographer_file)
                                else "",
                                word_form,
-                               " {}".format(lexical_id) if lexical_id.neq("0") else "")
-    else:
-        pass
+                               " {}".format(lexical_id) if lexical_id != 0 else "")
 
 def print_synset(graph, synset, sorted_word_senses, lexicographerFile, synset_relations,
                  word_relations, frames_to_id, write):
     def print_relations():
+        def print_relation(name, wordsense_id):
+            return "{}: {}".format(name,
+                                   print_word_sense_id(wordsense_id, lexicographerFile))
         rels = []
         for predicate, obj in graph.predicate_objects(synset):
             _, predicate_name = r.namespace.split_uri(predicate)            
@@ -124,13 +130,13 @@ def print_synset(graph, synset, sorted_word_senses, lexicographerFile, synset_re
             if predicate_name == "frame":
                 pass
             elif predicate_txt_name:
-                rels.append("{}: {}".format(predicate_txt_name,
-                                            word_sense_id(graph, lexicographerFile,
-                                                          # first word sense is head
-                                                          sort_word_senses(graph, obj)[0])))
+                rels.append((predicate_txt_name,
+                             word_sense_id(graph, lexicographerFile,
+                                           # first word sense is head
+                                           sort_word_senses(graph, obj)[0])))
         rels.sort()
-        for relation in rels:
-            write(relation)
+        for (relation_name, target) in rels:
+            write(print_relation(relation_name, target))
 
     for word_sense in sorted_word_senses:
         print_word_sense(graph, word_sense, lexicographerFile,
@@ -152,6 +158,9 @@ def print_synset(graph, synset, sorted_word_senses, lexicographerFile, synset_re
 def print_word_sense(graph, word_sense, lexicographerFile,
                      relations_map, frames_to_id, write):
     def print_word_relations():
+        def print_word_relation(name, wordsense_id):
+            return " {} {}".format(name,
+                                   print_word_sense_id(wordsense_id, lexicographerFile))
         frames = []
         relations = []
         markers = []
@@ -163,8 +172,8 @@ def print_word_sense(graph, word_sense, lexicographerFile,
             elif predicate_name == "syntacticMarker":
                 markers.append(obj)
             elif predicate_txt_name:
-                relations.append(" {} {}".format(predicate_txt_name,
-                                                 word_sense_id(graph, lexicographerFile, obj)))
+                relations.append((predicate_txt_name,
+                                  word_sense_id(graph, lexicographerFile, obj)))
         if frames:
             frames.sort()
             write(" fs {}".format(" ".join(frames)), end="")
@@ -172,9 +181,15 @@ def print_word_sense(graph, word_sense, lexicographerFile,
             [marker] = markers # check that there is only one marker
             write(" marker {}".format(marker), end="")
         relations.sort()
-        write("".join(relations))
+        for relation_name, target in relations:
+            write(print_word_relation(relation_name, target), end="")
+        write("")
 
-    write("w: {}".format(word_sense_id(graph, lexicographerFile, word_sense)), end="")
+    write("w: {}".format(print_word_sense_id(word_sense_id(graph,
+                                                           lexicographerFile,
+                                                           word_sense),
+                                             lexicographerFile)),
+          end="")
     print_word_relations()
 
 
