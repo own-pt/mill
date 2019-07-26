@@ -1,0 +1,12 @@
+# -*- mode: org -*-
+
+#+Title: mill mode
+
+* use-package declaration
+
+#+BEGIN_SRC elisp
+
+  (use-package mill
+    :load-path "PATH-TO/mill/elisp/")
+
+#+END_SRC
