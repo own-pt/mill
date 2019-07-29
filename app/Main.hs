@@ -5,7 +5,9 @@ import Lib ( validateLexicographerFile
            , lexicographerFilesInDirectoryToTriples)
 
 import System.Directory (doesDirectoryExist)
-import Options.Applicative
+import Options.Applicative (customExecParser, prefs, ParserInfo, Parser, showHelpOnError
+                           , command, subparser, info, helper, fullDesc, progDesc
+                           , argument, str, help, metavar, header)
 
 data Command = Validate FilePath
   | ExportCommand FilePath FilePath deriving Show
