@@ -11,15 +11,16 @@ module Lib
 import Data (Synset,Unvalidated,Validated)
 import Parse (parseLexicographer)
 import Validate ( validateSynsetsInIndex, Validation(..), makeIndex
-                , validateSynsets, syntaxSourceErrors
-                , SourceValidation)
+                , validateSynsets, SourceValidation)
 ----------------------------------
 import Control.Monad (unless,(>>))
 import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
 import Data.Either
-import Data.Functor(($>),void)
+import Data.Functor(void)
 import Data.List (partition)
+import Data.List.NonEmpty (NonEmpty(..))
+import Data.Maybe (fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
@@ -35,23 +36,21 @@ import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 
 
-parseLexicographerFile :: FilePath -> IO (Either () [Synset Unvalidated])
+parseLexicographerFile :: FilePath -> IO (SourceValidation [Synset Unvalidated])
 parseLexicographerFile filePath = do
   content <- TIO.readFile $ normalise filePath
-  case parseLexicographer filePath content of
-    Left err -> putStr err $> Left ()
-    Right lexFileSynsets ->
-      return $ Right lexFileSynsets
+  let result = parseLexicographer filePath content
+  return result
 
 parseLexicographerFiles :: [FilePath] -> IO (SourceValidation [Synset Validated])
 parseLexicographerFiles filePaths = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile filePaths
-  case partitionEithers lexFilesSynsetsOrErrors of
-    ([], lexFilesSynsets) ->
+  case sequenceA lexFilesSynsetsOrErrors of
+    Success lexFilesSynsets ->
       let synsets = concat lexFilesSynsets
           index   = makeIndex synsets
       in return $ validateSynsetsInIndex index
-    _ -> return $ Failure syntaxSourceErrors
+    Failure sourceErrors -> return $ Failure sourceErrors
 
 data Config = Config
   { lexnamesToId :: Map Text Int
@@ -102,9 +101,17 @@ lexicographerFilesInDirectory filesDirectory = do
   where
     go lexFileId = filesDirectory </> T.unpack lexFileId
 
-printValidation :: SourceValidation [Synset Validated] -> IO ()
-printValidation (Failure errors) = mapM_ (putDoc . pretty) errors
-printValidation _ = return ()
+
+prettyPrintList :: Pretty a => NonEmpty a -> IO ()
+prettyPrintList = mapM_ (putDoc . pretty)
+
+validateSynsetsNoParseErrors :: Foldable t => t [Synset Unvalidated] -> Maybe [Synset Unvalidated] -> IO ()
+validateSynsetsNoParseErrors indexSynsets maybeSynsetsToValidate =
+  let synsets = concat indexSynsets
+      index   = makeIndex synsets
+  in case validateSynsets index (fromMaybe synsets maybeSynsetsToValidate) of
+    Success _ -> return ()
+    Failure errors -> prettyPrintList errors
     
 validateLexicographerFile :: FilePath -> IO ()
 validateLexicographerFile filePath = do
@@ -117,24 +124,22 @@ validateLexicographerFile filePath = do
   where
     go fileToValidate otherFiles = do
       lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
-      case partitionEithers lexFilesSynsetsOrErrors of
-        ([], lexFilesSynsets@(synsetsToValidate:_)) ->
-          let synsets = concat lexFilesSynsets
-              index   = makeIndex synsets
-          in printValidation $ validateSynsets index synsetsToValidate
-        _ -> return ()
+      case sequenceA lexFilesSynsetsOrErrors of
+        Failure parseErrors
+          -> prettyPrintList parseErrors
+        Success [] -> return ()
+        Success lexFilesSynsets@(synsetsToValidate:_)
+          -> validateSynsetsNoParseErrors lexFilesSynsets (Just synsetsToValidate)
 
 validateLexicographerFiles :: FilePath -> IO ()
 validateLexicographerFiles filesDirectory = do
   lexicographerFiles <- lexicographerFilesInDirectory filesDirectory
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile lexicographerFiles
-  case partitionEithers lexFilesSynsetsOrErrors of
-    ([], lexfilesSynsets) ->
-      let synsets = concat lexfilesSynsets
-          index = makeIndex synsets
-          in printValidation $ validateSynsets index synsets
-    _ -> return ()
-
+  case sequenceA lexFilesSynsetsOrErrors of
+    Failure parseErrors
+      -> prettyPrintList parseErrors
+    Success lexFilesSynsets
+      -> validateSynsetsNoParseErrors lexFilesSynsets Nothing
 
 wn30 :: IRI
 wn30 = "https://w3id.org/own-pt/wn30-en/"

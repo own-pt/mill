@@ -4,7 +4,8 @@ module Validate
   , makeIndex
   , Validation(..)
   , SourceValidation
-  , syntaxSourceErrors
+  , SourceError(..)
+  , WNError (..)
   ) where
 
 import Data
@@ -17,8 +18,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.GenericTrie (Trie, fromList, member, foldWithKey, empty, insert)
 import Data.Text.Prettyprint.Doc
-  ( Pretty(..),Doc,(<+>), colon, align, hsep
-  , emptyDoc, line, indent, vsep)
+  ( Pretty(..),Doc,(<+>), colon, align, hsep, nest
+  , line, indent, vsep)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
@@ -64,7 +65,7 @@ instance Semigroup e => Applicative (Validation e) where
   Failure e <*> Failure e' = Failure (e <> e')
 
 data WNError
-  = SyntaxErrors
+  = ParseError String
   | MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
   | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
@@ -73,13 +74,10 @@ data WNError
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
   deriving (Show)
 
-data SourceError = SourceError LexicographerFileId SourcePosition WNError deriving (Show)
-
-syntaxSourceErrors :: NonEmpty SourceError
--- this is wrong
-syntaxSourceErrors = SourceError (LexicographerFileId (N, "placeholder"))
-                                 (SourcePosition (0,0))
-                     SyntaxErrors :| []
+data SourceError
+  = SourceError Text -- ^ name of source file
+                SourcePosition
+                WNError deriving (Show)
 
 type WNValidation a = Validation (NonEmpty WNError) a
 type SourceValidation a = Validation (NonEmpty SourceError) a
@@ -102,7 +100,7 @@ prettyUnordered what sequences
       pretty x <+> "should come after" <+> hsep (map pretty xs)
   
 instance Pretty WNError where
-  pretty SyntaxErrors = emptyDoc
+  pretty (ParseError errorString) = pretty errorString
   pretty (MissingSynsetRelationTarget (SynsetRelation relationName target))
     = prettyMissingTarget "synset relation" relationName $ pretty target
   pretty (MissingWordRelationTarget (WordPointer pointerName target))
@@ -120,17 +118,18 @@ instance Pretty SourceError where
   pretty (SourceError lexicographerFileId (SourcePosition (beg, end)) wnError)
     =   pretty lexicographerFileId
     <>  colon <> pretty beg <> colon <> pretty end <> colon
-    <+> pretty wnError <> line
+    <+> nest 2 (pretty wnError) <> line
 
 ---
 -- checks
 checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
-checkSynset index Synset{lexicographerFileId, wordSenses, relations
-                        , definition, examples, frames, sourcePosition} =
+checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition
+                        , examples, frames, sourcePosition} =
   case result of
     Success synset -> Success synset
-    Failure errors -> Failure $ NE.map (SourceError lexicographerFileId sourcePosition) errors
+    Failure errors -> Failure $ NE.map (SourceError lexfileName sourcePosition) errors
   where
+    lexfileName = lexicographerFileIdToText lexicographerFileId
     result = Synset
       <$> Success sourcePosition
       <*> Success lexicographerFileId
@@ -240,7 +239,8 @@ validateSynsets index synsets =
       = bimap (NE.map toSourceError) id $ validateSorted validatedSynsets
     checkSynsetsOrder (Failure es) = Failure es
     toSourceError errs@(Synset{sourcePosition, lexicographerFileId} :| _)
-      = SourceError lexicographerFileId sourcePosition
+      = SourceError (lexicographerFileIdToText lexicographerFileId)
+          sourcePosition
           (UnsortedSynsets (errs :| []))
     checkedSynsets = foldr go (Success []) synsets
     go synset result = (:) <$> checkSynset' synset <*> result

@@ -1,6 +1,7 @@
 module Parse (parseLexicographer) where
 
 import Data
+import Validate (SourceError(..), WNError(..), SourceValidation, Validation(..))
 
 import Control.Applicative hiding (some,many)
 import qualified Control.Applicative.Combinators.NonEmpty as NC
@@ -25,25 +26,22 @@ type RawSynset = Either (ParseError Text Void) (Synset Unvalidated)
 type Parser = ParsecT Void Text (State LexicographerFileId)
 
 parseLexicographer :: String -> Text
-  -> Either String [Synset Unvalidated]
+  -> SourceValidation [Synset Unvalidated]
 parseLexicographer fileName inputText =
   case evalState (runParserT lexicographerFile fileName inputText)
                 (LexicographerFileId (N, "_")) of
     Right rawSynsets
       -> case partitionEithers rawSynsets of
-           ([], synsetsToValidate) -> Right synsetsToValidate
-           (parseErrors, _) -> Left . errorBundlePretty
-                                 $ ParseErrorBundle (NE.fromList parseErrors) initialPosState
-    Left errors -> Left $ errorBundlePretty errors
+           ([], synsetsToValidate) -> Success synsetsToValidate
+           (parseErrors, _) -> Failure . NE.map toSourceError $ NE.fromList parseErrors
+    Left ParseErrorBundle{bundleErrors} ->
+      Failure . NE.map toSourceError $ bundleErrors
   where
-    initialPosState = PosState
-      { pstateInput = inputText
-      , pstateOffset = 0
-      , pstateSourcePos = initialPos fileName
-      , pstateTabWidth = defaultTabWidth
-      , pstateLinePrefix = ""
-      }
-
+    toSourceError parseError
+      = let errorPos = errorOffset parseError
+        in SourceError (T.pack fileName)
+                       (SourcePosition (errorPos, errorPos +1))
+                       (ParseError $ parseErrorTextPretty parseError)
 
 lexicographerIdP :: Parser LexicographerFileId
 lexicographerIdP = do
