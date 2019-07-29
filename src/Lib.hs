@@ -16,16 +16,18 @@ import Validate ( validateSynsetsInIndex, Validation(..), makeIndex
 import Control.Monad (unless,(>>))
 import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
-import Data.Either
+import Data.Either (partitionEithers)
 import Data.Functor(void)
 import Data.List (partition)
 import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
 import Data.RDF.ToRDF (toTriples)
 import Data.RDF.Types (RDFGraph(..), IRI(..))
+import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -36,18 +38,19 @@ import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 
 
-parseLexicographerFile :: FilePath -> IO (SourceValidation [Synset Unvalidated])
+parseLexicographerFile :: FilePath -> IO (SourceValidation (NonEmpty (Synset Unvalidated)))
 parseLexicographerFile filePath = do
   content <- TIO.readFile $ normalise filePath
   let result = parseLexicographer filePath content
   return result
 
-parseLexicographerFiles :: [FilePath] -> IO (SourceValidation [Synset Validated])
+parseLexicographerFiles :: NonEmpty FilePath
+  -> IO (SourceValidation (NonEmpty (Synset Validated)))
 parseLexicographerFiles filePaths = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile filePaths
   case sequenceA lexFilesSynsetsOrErrors of
     Success lexFilesSynsets ->
-      let synsets = concat lexFilesSynsets
+      let synsets = sconcat lexFilesSynsets
           index   = makeIndex synsets
       in return $ validateSynsetsInIndex index
     Failure sourceErrors -> return $ Failure sourceErrors
@@ -87,7 +90,7 @@ readConfig configurationDir = do
     relationsReader [_,relationName,rdfName,_,_,_] = Right (relationName, rdfName)
     relationsReader _ = Left "Wrong number of fields in relations.tsv"
 
-lexicographerFilesInDirectory :: FilePath -> IO [FilePath]
+lexicographerFilesInDirectory :: FilePath -> IO (NonEmpty FilePath)
 lexicographerFilesInDirectory filesDirectory = do
   doesDirectoryExist' <- doesDirectoryExist filesDirectory
   if doesDirectoryExist'
@@ -95,9 +98,11 @@ lexicographerFilesInDirectory filesDirectory = do
       Config{lexnamesToId} <- readConfig filesDirectory
       let lexnames = map (normalise . go . fst)
                        $ M.toList lexnamesToId
-      return lexnames
+      if null lexnames
+        then error "No files specified in lexnames.tsv"
+        else return $ NE.fromList lexnames
     else
-    putStrLn ("Directory " ++ filesDirectory ++ "does not exist.") >> return []
+    error ("Directory " ++ filesDirectory ++ "does not exist.")
   where
     go lexFileId = filesDirectory </> T.unpack lexFileId
 
@@ -105,9 +110,9 @@ lexicographerFilesInDirectory filesDirectory = do
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)
 
-validateSynsetsNoParseErrors :: Foldable t => t [Synset Unvalidated] -> Maybe [Synset Unvalidated] -> IO ()
+validateSynsetsNoParseErrors :: NonEmpty (NonEmpty (Synset Unvalidated)) -> Maybe (NonEmpty (Synset Unvalidated)) -> IO ()
 validateSynsetsNoParseErrors indexSynsets maybeSynsetsToValidate =
-  let synsets = concat indexSynsets
+  let synsets = sconcat indexSynsets
       index   = makeIndex synsets
   in case validateSynsets index (fromMaybe synsets maybeSynsetsToValidate) of
     Success _ -> return ()
@@ -117,18 +122,17 @@ validateLexicographerFile :: FilePath -> IO ()
 validateLexicographerFile filePath = do
   let normalFilePath = normalise filePath
   lexicographerFiles <- lexicographerFilesInDirectory $ takeDirectory normalFilePath
-  case partition (equalFilePath normalFilePath) lexicographerFiles of
+  case partition (equalFilePath normalFilePath) $ NE.toList lexicographerFiles of
     ([fileToValidate], otherLexicographerFiles) -> go fileToValidate otherLexicographerFiles
     ([], lexFiles) -> go normalFilePath lexFiles
     _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
     go fileToValidate otherFiles = do
-      lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:otherFiles)
+      lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:|otherFiles)
       case sequenceA lexFilesSynsetsOrErrors of
         Failure parseErrors
           -> prettyPrintList parseErrors
-        Success [] -> return ()
-        Success lexFilesSynsets@(synsetsToValidate:_)
+        Success lexFilesSynsets@(synsetsToValidate:|_)
           -> validateSynsetsNoParseErrors lexFilesSynsets (Just synsetsToValidate)
 
 validateLexicographerFiles :: FilePath -> IO ()
@@ -144,7 +148,7 @@ validateLexicographerFiles filesDirectory = do
 wn30 :: IRI
 wn30 = "https://w3id.org/own-pt/wn30-en/"
 
-synsetsToTriples :: [Synset Validated] -> FilePath -> IO ()
+synsetsToTriples :: NonEmpty (Synset Validated) -> FilePath -> IO ()
 synsetsToTriples synsets outputFile =
   encodeFile outputFile
   . toLazyByteString
@@ -152,7 +156,7 @@ synsetsToTriples synsets outputFile =
   where
     synsetsTriples = concatMap (toTriples wn30) synsets
 
-lexicographerFilesToTriples :: [FilePath] -> FilePath -> IO ()
+lexicographerFilesToTriples :: NonEmpty FilePath -> FilePath -> IO ()
 lexicographerFilesToTriples fileNames outputFile = do
   synsetsValid <- parseLexicographerFiles fileNames
   case synsetsValid of

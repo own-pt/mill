@@ -9,6 +9,7 @@ import Control.Monad (void)
 import Control.Monad.State.Strict (State,evalState,get,put)
 import Data.Char (isSpace)
 import Data.Either (partitionEithers)
+import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -26,13 +27,13 @@ type RawSynset = Either (ParseError Text Void) (Synset Unvalidated)
 type Parser = ParsecT Void Text (State LexicographerFileId)
 
 parseLexicographer :: String -> Text
-  -> SourceValidation [Synset Unvalidated]
+  -> SourceValidation (NonEmpty (Synset Unvalidated))
 parseLexicographer fileName inputText =
   case evalState (runParserT lexicographerFile fileName inputText)
                 (LexicographerFileId (N, "_")) of
     Right rawSynsets
-      -> case partitionEithers rawSynsets of
-           ([], synsetsToValidate) -> Success synsetsToValidate
+      -> case partitionEithers (NE.toList rawSynsets) of
+           ([], synsetsToValidate) -> Success $ NE.fromList synsetsToValidate
            (parseErrors, _) -> Failure . NE.map toSourceError $ NE.fromList parseErrors
     Left ParseErrorBundle{bundleErrors} ->
       Failure . NE.map toSourceError $ bundleErrors
@@ -58,7 +59,7 @@ lexicographerIdP = do
     lexnameP = lexeme (takeWhile1P Nothing (`notElem` [' ','\t',':','\n'])
                  <?> "Lexicographer file name (must not contain whitespace or a colon)")
 
-lexicographerFile :: Parser [RawSynset]
+lexicographerFile :: Parser (NonEmpty RawSynset)
 lexicographerFile = do
   _          <- spaceConsumer
   lexId      <- lexicographerIdP
@@ -68,8 +69,8 @@ lexicographerFile = do
   _          <- eof
   return rawSynsets
 
-synsets :: Parser [RawSynset]
-synsets = synsetOrError `sepEndBy1` many linebreak
+synsets :: Parser (NonEmpty RawSynset)
+synsets = synsetOrError `NC.sepEndBy1` many linebreak
   where
     synsetOrError = withRecovery recover (Right <$> synset)
     recover :: ParseError Text Void -> Parser RawSynset

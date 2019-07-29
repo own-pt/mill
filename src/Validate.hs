@@ -26,7 +26,7 @@ import Data.Text.Prettyprint.Doc
 
 type Index a = Trie String (Either String a) -- Left is a reference to another key
 
-makeIndex :: [Synset Unvalidated] -> Index (Synset Unvalidated)
+makeIndex :: NonEmpty (Synset Unvalidated) -> Index (Synset Unvalidated)
 makeIndex synsets = fromList keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
@@ -223,26 +223,26 @@ validateIndex index = foldWithKey go (Success empty) index
 
 
 validateSynsetsInIndex :: Index (Synset Unvalidated)
-  -> SourceValidation [Synset Validated]
-validateSynsetsInIndex index = foldWithKey go (Success []) index
+  -> SourceValidation (NonEmpty (Synset Validated))
+validateSynsetsInIndex index = bimap id NE.fromList $ foldWithKey go (Success []) index
   where
     go _ (Left _) result = result
     go _ (Right synset) result = (:) <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
 
-validateSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
-  -> SourceValidation [Synset Validated]
-validateSynsets index synsets =
+validateSynsets :: Index (Synset Unvalidated) -> NonEmpty (Synset Unvalidated)
+  -> SourceValidation (NonEmpty (Synset Validated))
+validateSynsets index (firstSynset:|synsets) =
   checkSynsetsOrder checkedSynsets
   where
     checkSynsetsOrder (Success validatedSynsets)
-      = bimap (NE.map toSourceError) id $ validateSorted validatedSynsets
+      = bimap (NE.map toSourceError) NE.fromList . validateSorted $ NE.toList validatedSynsets
     checkSynsetsOrder (Failure es) = Failure es
     toSourceError errs@(Synset{sourcePosition, lexicographerFileId} :| _)
       = SourceError (lexicographerFileIdToText lexicographerFileId)
           sourcePosition
           (UnsortedSynsets (errs :| []))
-    checkedSynsets = foldr go (Success []) synsets
+    checkedSynsets   = (:|) <$> checkSynset' firstSynset <*> foldr go (Success []) synsets
     go synset result = (:) <$> checkSynset' synset <*> result
     checkSynset' = checkSynset index
 
