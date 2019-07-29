@@ -10,7 +10,7 @@
   "TODO: docstring"
   (setq-local truncate-lines t)
   (mill-setup-flymake-backend)
-  (flymake-mode))
-
+  (flymake-mode)
+  (remove-hook 'after-change-functions 'flymake-after-change-function t))
 
 (provide 'mill-mode)
