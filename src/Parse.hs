@@ -78,7 +78,7 @@ synsets = synsetOrError `NC.sepEndBy1` many linebreak
 
 synset :: Parser (Synset Unvalidated)
 synset = do
-  startOffset      <- getOffset
+  startOffset      <- (1 +) <$> getOffset
   lexicographerId  <- get
   synsetWordSenses <- wordSenseStatement `NC.endBy1` linebreak
   synsetDefinition <- definitionStatement <* linebreak
