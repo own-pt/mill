@@ -3,6 +3,7 @@
 ;; dependecies
 
 (require 'mill-flymake)
+(require 'xref)
 
 ;; constants
 
@@ -51,12 +52,68 @@
      nil
      (0 font-lock-constant-face))))
 
+;;  mill xref backend
+
+(defun mill--xref-backend () 'xref-mill)
+
+(cl-defmethod xref-backend-identifier-at-point ((_backend (eql xref-mill)))
+  (if (or (eq (get-char-property (point) 'face) 'font-lock-function-name-face)
+	  (eq (get-char-property (point) 'face) 'font-lock-constant-face))
+      (let ((beg (previous-single-property-change (point) 'face nil (line-beginning-position)))
+	    (end (next-single-property-change (point) 'face nil (line-end-position))))
+	(buffer-substring beg end))))
+
+
+(defun mill-xref-collect-matches (regexp file) ;; TODO: document
+  ;; inspired by `xref-collect-matches'
+  (let ((command (format "grep -n -e \"%s\" %s" regexp file)) ;; TODO: grep adds external dependece, remove?
+	(def default-directory)
+	(grep-re "^\\([0-9]+\\):\\(.*\\)")
+	(status)
+	(hits))
+    (with-current-buffer (get-buffer-create " *xref-mill-grep*")
+      (erase-buffer)
+      (setq default-directory def)
+      (setq status
+            (call-process-shell-command command nil t))
+      (goto-char (point-min))
+
+      (when (and (/= (point-min) (point-max))
+                 (not (looking-at grep-re)))
+        (user-error "Search failed with status %d: %s" status (buffer-string)))
+
+      (cl-loop while (re-search-forward  grep-re nil t)
+	       collect (xref-make (match-string 2)
+				  (xref-make-file-location file
+							   (string-to-number (match-string 1))
+							   0))
+	       into hits
+	       finally (return hits)))))
+
+
+(cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
+  (let ((ident (string-trim identifier)))
+    (if (string-match "\\(.*\\):\\(\\sw+\\) *\\([0-9]*\\)" ident)
+
+	(let ((namespace (match-string 1 ident))
+	      (word      (match-string 2 ident))
+	      (position  (match-string 3 ident)))
+	  (mill-xref-collect-matches
+	   (if (string-empty-p position)
+	       (concatenate 'string "^w: \\+" word "\\( *$\\| \\+[^0-9]\\+.*\\)")
+	     (concatenate 'string "^w: \\+" word " \\+" position))
+	   (format "%s%s" default-directory namespace) ))
+
+      (mill-xref-collect-matches (concatenate 'string "^w: \\+" ident)
+				 (buffer-file-name)))))
+
 ;;;###autoload
 
 (define-derived-mode mill-mode fundamental-mode "mill"
   "TODO: docstring"
 
   ;; syntax-table
+  ;;; word
   (modify-syntax-entry ?. "w")
   (modify-syntax-entry ?: "w")
   (modify-syntax-entry ?- "w")
@@ -76,6 +133,9 @@
         `((,mill--font-lock-def-word-and-relations
 	   ,mill--font-lock-kwds-defs
 	   ,mill--font-lock-synset-relation)
-	  nil)))
+	  nil))
+
+  ;; xref
+  (add-hook 'xref-backend-functions #'mill--xref-backend nil t))
 
 (provide 'mill-mode)
