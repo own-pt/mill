@@ -105,8 +105,26 @@
 	 (concatenate 'string "^w: \\+" word " \\+" position))
        file))))
 
-;;;###autoload
 
+;; ident
+
+(defconst default-tab-width 3)
+
+(defun mill--indent-line ()
+  (beginning-of-line)
+  (if (bobp)
+      (indent-line-to 0)
+    (let ((not-indented t) cur-indent)
+      (if (looking-at "^[ \t]*\\sw+:")
+	  (setq cur-indent 0)
+	(save-excursion
+	  (forward-line -1)
+	  (if (looking-at "^d:")
+	      (setq cur-indent default-tab-width)
+	    (setq cur-indent (current-indentation)))))
+      (indent-line-to cur-indent))))
+
+;;;###autoload
 (define-derived-mode mill-mode fundamental-mode "mill"
   "TODO: docstring"
 
@@ -134,6 +152,9 @@
 	  nil))
 
   ;; xref
-  (add-hook 'xref-backend-functions #'mill--xref-backend nil t))
+  (add-hook 'xref-backend-functions #'mill--xref-backend nil t)
+
+  ;; indentation
+  (setq-local indent-line-function 'mill--indent-line))
 
 (provide 'mill-mode)
