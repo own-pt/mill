@@ -93,19 +93,17 @@
 
 (cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
   (let ((ident (string-trim identifier)))
-    (if (string-match "\\(.*\\):\\(\\sw+\\) *\\([0-9]*\\)" ident)
-
-	(let ((namespace (match-string 1 ident))
-	      (word      (match-string 2 ident))
-	      (position  (match-string 3 ident)))
-	  (mill-xref-collect-matches
-	   (if (string-empty-p position)
-	       (concatenate 'string "^w: \\+" word "\\( *$\\| \\+[^0-9]\\+.*\\)")
-	     (concatenate 'string "^w: \\+" word " \\+" position))
-	   (format "%s%s" default-directory namespace) ))
-
-      (mill-xref-collect-matches (concatenate 'string "^w: \\+" ident)
-				 (buffer-file-name)))))
+    (string-match "\\(\\(.*\\):\\(\\sw+\\)\\|\\(\\sw+\\)\\) *\\([0-9]*\\)" ident)
+    (let ((file (if (match-string 2 ident)
+		    (format "%s%s" default-directory (match-string 2 ident))
+		  (buffer-file-name)))
+	  (word (or (match-string 3 ident) (match-string 4 ident)))
+	  (position (match-string 5 ident)))
+      (mill-xref-collect-matches
+       (if (string-empty-p position)
+	   (concatenate 'string "^w: \\+" word "\\( *$\\| \\+[^0-9]\\+.*\\)")
+	 (concatenate 'string "^w: \\+" word " \\+" position))
+       file))))
 
 ;;;###autoload
 
