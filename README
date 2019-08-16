@@ -4,6 +4,9 @@
 *this is a work in progress -- it is incomplete, and things will
 change*
 
+This tool will eventually produce the data found in
+https://github.com/own-pt/own-en/.
+
 * Data format
 - order matters (because we also want to print to this format after
   doing modifications automatically)
