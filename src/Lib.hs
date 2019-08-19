@@ -10,7 +10,7 @@ module Lib
 
 import Data (Synset,Unvalidated,Validated)
 import Parse (parseLexicographer)
-import Validate ( validateSynsetsInIndex, Validation(..), makeIndex
+import Validate ( Validation(..), makeIndex
                 , validateSynsets, SourceValidation)
 ----------------------------------
 import Control.Monad (unless,(>>))
@@ -52,7 +52,7 @@ parseLexicographerFiles filePaths = do
     Success lexFilesSynsets ->
       let synsets = sconcat lexFilesSynsets
           index   = makeIndex synsets
-      in return $ validateSynsetsInIndex index
+      in return $ validateSynsets index synsets
     Failure sourceErrors -> return $ Failure sourceErrors
 
 data Config = Config
