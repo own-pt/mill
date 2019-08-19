@@ -16,10 +16,13 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.GenericTrie (Trie, fromList, member, foldWithKey, empty, insert)
+import Data.GenericTrie (Trie, fromList, member, foldWithKey)
 import Data.Text.Prettyprint.Doc
   ( Pretty(..),Doc,(<+>), colon, align, hsep, nest
   , line, indent, vsep)
+
+singleton :: a -> NonEmpty a
+singleton x = x :| []
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
@@ -66,6 +69,9 @@ instance Semigroup e => Applicative (Validation e) where
 
 data WNError
   = ParseError String
+  | DuplicateWordSense (NonEmpty WNWord)
+  | DuplicateWordRelation (NonEmpty WordPointer)
+  | DuplicateSynsetRelation (NonEmpty SynsetRelation)
   | MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
   | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
@@ -86,21 +92,33 @@ type SourceValidation a = Validation (NonEmpty SourceError) a
 -- Pretty instances
 prettyMissingTarget :: Text -> Text -> Doc ann -> Doc ann
 prettyMissingTarget relationType relationName target
-  =   "Missing"
+  =   "error: Missing"
   <+> pretty relationType
   <+> pretty relationName
   <+> "target" <+> target
 
 prettyUnordered :: Pretty a => Text -> NonEmpty (NonEmpty a) -> Doc ann
 prettyUnordered what sequences
-  = "Unsorted" <+> pretty what <> line
+  = "warning: Unsorted" <+> pretty what <> line
   <> (indent 2 . align . vsep . map prettyUnorderedSequence $ NE.toList sequences)
   where
     prettyUnorderedSequence (x:|xs) =
       pretty x <+> "should come after" <+> hsep (map pretty xs)
+
+prettyDuplicate :: Pretty a => Text -> NonEmpty a -> Doc ann
+prettyDuplicate what duplicates
+  = "error: Duplicate"
+  <+> pretty what
+  <+> pretty (NE.head duplicates)
   
 instance Pretty WNError where
   pretty (ParseError errorString) = pretty errorString
+  pretty (DuplicateWordSense wordSenses)
+    = prettyDuplicate "wordsense" wordSenses
+  pretty (DuplicateWordRelation wordPointers)
+    = prettyDuplicate "word pointer" wordPointers
+  pretty (DuplicateSynsetRelation synsetRelations)
+    = prettyDuplicate "synset relation" synsetRelations
   pretty (MissingSynsetRelationTarget (SynsetRelation relationName target))
     = prettyMissingTarget "synset relation" relationName $ pretty target
   pretty (MissingWordRelationTarget (WordPointer pointerName target))
@@ -146,14 +164,12 @@ checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition
 checkSynsetRelations :: Index a -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
 checkSynsetRelations index synsetRelations
-  =  checkSynsetRelationsTargets index synsetRelations
-  *> checkSynsetRelationsOrder synsetRelations
+  =  checkSynsetRelationsOrderNoDuplicates
+  *> checkSynsetRelationsTargets index synsetRelations
   *> Success synsetRelations
-
-checkSynsetRelationsOrder :: [SynsetRelation] -> WNValidation [SynsetRelation]
-checkSynsetRelationsOrder synsetRelations
-  = bimap (\errs -> UnsortedSynsetRelations errs :| []) id
-  $ validateSorted synsetRelations
+  where
+    checkSynsetRelationsOrderNoDuplicates
+      = checkSortNoDuplicates UnsortedSynsetRelations DuplicateSynsetRelation synsetRelations
 
 checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
@@ -169,30 +185,52 @@ checkSynsetRelationsTargets index = traverse checkSynsetRelation
 validateSorted :: Ord a => [a] -> Validation (NonEmpty (NonEmpty a)) [a]
 -- maybe just sort input instead of picking some of the errors?
 --- or maybe just check if every pair is sorted, which will be faster
---- but might take more iterations to find all errors
-validateSorted [] = Success []
-validateSorted [x] = Success [x]
+--- but will take more iterations to find all errors
 validateSorted (x:y:xt)
   | x <= y    = (:) <$> Success x <*> validateSorted (y:xt)
   | otherwise = let (wrongs, _) = span (< x) xt
                 in (:) <$> Failure ((x:|(y:wrongs)):|[])
                        <*> validateSorted (y:xt)
+validateSorted x = Success x
+
+validateNoDuplicates :: Ord a => [a] -> Validation (NonEmpty a) [a]
+validateNoDuplicates (x:y:xt)
+  | x < y  = (:) <$> Success x <*> validateNoDuplicates (y:xt)
+  | x == y = let (equals, rest) = span (== x) xt
+             in (:) <$> Failure (x:|y:equals) <*> validateNoDuplicates rest
+  | x > y  = error "Unsorted"
+validateNoDuplicates x = Success x
+
+checkSortNoDuplicates
+  :: Ord a
+  => (NonEmpty (NonEmpty a) -> WNError)
+  -> (NonEmpty a -> WNError)
+  -> [a]
+  -> WNValidation [a]
+checkSortNoDuplicates toSortError toDuplicateError = sortedCheckNoDuplicates . validateSorted
+  where
+    sortedCheckNoDuplicates (Failure unsortedSequences)
+      = Failure (singleton $ toSortError unsortedSequences)
+    sortedCheckNoDuplicates (Success xs)
+      = bimap (singleton . toDuplicateError) id $ validateNoDuplicates xs
 
 checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
 checkWordSenses index wordSenses
-  =  checkWordSensesOrder wordSenses
+  =  checkWordSensesOrderNoDuplicates wordSenses
   *> traverse (checkWordSense index) wordSenses
   *> Success wordSenses
+  where
+    checkWordSensesOrderNoDuplicates
+      = checkSortNoDuplicates UnsortedSynsetWordSenses DuplicateWordSense . NE.toList
 
 checkWordSense :: Index a -> WNWord -> WNValidation WNWord
 checkWordSense index wordSense@(WNWord _ _ wordPointers)
-  =  checkWordSensePointersOrder
+  =  checkWordSensePointersOrderNoDuplicates
   *> checkWordSensePointersTargets index wordPointers
   *> Success wordSense
   where
-    checkWordSensePointersOrder =
-      bimap (\errs -> UnsortedWordPointers errs :| []) id
-      $ validateSorted wordPointers
+    checkWordSensePointersOrderNoDuplicates =
+      checkSortNoDuplicates UnsortedWordPointers DuplicateWordRelation wordPointers
     
 
 checkWordSensePointersTargets :: Index a -> [WordPointer]
@@ -207,20 +245,15 @@ checkWordSensePointersTargets index = traverse checkWordPointer
       where
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
-checkWordSensesOrder :: NonEmpty WNWord -> WNValidation [WNWord]
-checkWordSensesOrder = bimap (\errs -> UnsortedSynsetWordSenses errs :| []) id
-  . validateSorted . NE.toList
-
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
-validateIndex :: Index (Synset Unvalidated) -> SourceValidation (Index (Synset Validated))
--- [ ] not validating if there are two things with the same reference
-validateIndex index = foldWithKey go (Success empty) index
-  where
-    go key (Left headWordKey) result = insert key (Left headWordKey) <$> result
-    go key (Right synset)     result = insert key . Right <$> checkSynset' synset <*> result
-    checkSynset' = checkSynset index
-
+-- validateIndex :: Index (Synset Unvalidated) -> SourceValidation (Index (Synset Validated))
+-- -- [ ] not validating if there are two things with the same reference
+-- validateIndex index = foldWithKey go (Success empty) index
+--   where
+--     go key (Left headWordKey) result = insert key (Left headWordKey) <$> result
+--     go key (Right synset)     result = insert key . Right <$> checkSynset' synset <*> result
+--     checkSynset' = checkSynset index
 
 validateSynsetsInIndex :: Index (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
