@@ -11,12 +11,13 @@ module Validate
 import Data
 
 import Data.Bifunctor (Bifunctor(..))
-import Data.List hiding (insert)
+import Prelude hiding (lookup)
+import Data.List (intercalate)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.GenericTrie (Trie, fromList, member, foldWithKey, empty, insert)
+import Data.GenericTrie (Trie, member, foldWithKey, lookup, fromList)
 import Data.Text.Prettyprint.Doc
   ( Pretty(..),Doc,(<+>), colon, align, hsep, nest
   , line, indent, vsep)
@@ -44,7 +45,7 @@ senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 senseKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) lexicalId =
   intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, show lexicalId]
 
----- validation
+ ---- validation
 data Validation e a = Failure e | Success a deriving (Show,Eq)
 
 instance Functor (Validation e) where
@@ -66,6 +67,7 @@ instance Semigroup e => Applicative (Validation e) where
 
 data WNError
   = ParseError String
+  | MissingReference (LexicographerFileId, WordSenseForm, LexicalId)
   | MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
   | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
@@ -86,14 +88,14 @@ type SourceValidation a = Validation (NonEmpty SourceError) a
 -- Pretty instances
 prettyMissingTarget :: Text -> Text -> Doc ann -> Doc ann
 prettyMissingTarget relationType relationName target
-  =   "Missing"
+  =   "error: Missing"
   <+> pretty relationType
   <+> pretty relationName
   <+> "target" <+> target
 
 prettyUnordered :: Pretty a => Text -> NonEmpty (NonEmpty a) -> Doc ann
 prettyUnordered what sequences
-  = "Unsorted" <+> pretty what <> line
+  = "warning: Unsorted" <+> pretty what <> line
   <> (indent 2 . align . vsep . map prettyUnorderedSequence $ NE.toList sequences)
   where
     prettyUnorderedSequence (x:|xs) =
@@ -101,6 +103,8 @@ prettyUnordered what sequences
   
 instance Pretty WNError where
   pretty (ParseError errorString) = pretty errorString
+  pretty (MissingReference identifier)
+    = "error: Missing reference to" <+> pretty identifier
   pretty (MissingSynsetRelationTarget (SynsetRelation relationName target))
     = prettyMissingTarget "synset relation" relationName $ pretty target
   pretty (MissingWordRelationTarget (WordPointer pointerName target))
@@ -122,7 +126,7 @@ instance Pretty SourceError where
 
 ---
 -- checks
-checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
+checkSynset :: Index (Synset Unvalidated) -> Synset Unvalidated -> SourceValidation (Synset Validated)
 checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition
                         , examples, frames, sourcePosition} =
   case result of
@@ -139,11 +143,7 @@ checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition
       <*> Success frames -- [ ] check frames
       <*> checkSynsetRelations index relations
 
-
---- use <*> for validation, or <*? see
---- https://www.reddit.com/r/haskell/comments/7hqodd/pure_functional_validation/
-
-checkSynsetRelations :: Index a -> [SynsetRelation]
+checkSynsetRelations :: Index (Synset Unvalidated) -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
 checkSynsetRelations index synsetRelations
   =  checkSynsetRelationsTargets index synsetRelations
@@ -155,7 +155,7 @@ checkSynsetRelationsOrder synsetRelations
   = bimap (\errs -> UnsortedSynsetRelations errs :| []) id
   $ validateSorted synsetRelations
 
-checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
+checkSynsetRelationsTargets :: Index (Synset Unvalidated) -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
@@ -178,24 +178,29 @@ validateSorted (x:y:xt)
                 in (:) <$> Failure ((x:|(y:wrongs)):|[])
                        <*> validateSorted (y:xt)
 
-checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
+checkWordSenses :: Index (Synset Unvalidated) -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
 checkWordSenses index wordSenses
   =  checkWordSensesOrder wordSenses
   *> traverse (checkWordSense index) wordSenses
   *> Success wordSenses
 
-checkWordSense :: Index a -> WNWord -> WNValidation WNWord
-checkWordSense index wordSense@(WNWord _ _ wordPointers)
+checkWordSense :: Index (Synset Unvalidated) -> WNWord -> WNValidation WNWord
+checkWordSense index wordSense@(WNWord (WordSenseIdentifier identifier) _ wordPointers)
   =  checkWordSensePointersOrder
   *> checkWordSensePointersTargets index wordPointers
-  *> Success wordSense
+  *> checkedWordSenseNotMissing
   where
+    checkedWordSenseNotMissing
+      = case lookup (wordSenseKey wordSense) index of
+          Nothing        -> Failure (MissingReference identifier :| [])
+          Just (Left _)  -> Success wordSense
+          Just (Right _) -> Success wordSense
     checkWordSensePointersOrder =
       bimap (\errs -> UnsortedWordPointers errs :| []) id
       $ validateSorted wordPointers
     
 
-checkWordSensePointersTargets :: Index a -> [WordPointer]
+checkWordSensePointersTargets :: Index (Synset Unvalidated) -> [WordPointer]
   -> WNValidation [WordPointer]
 checkWordSensePointersTargets index = traverse checkWordPointer
   where
@@ -213,13 +218,16 @@ checkWordSensesOrder = bimap (\errs -> UnsortedSynsetWordSenses errs :| []) id
 
 --- https://www.reddit.com/r/haskell/comments/6zmfoy/the_state_of_logging_in_haskell/
 
-validateIndex :: Index (Synset Unvalidated) -> SourceValidation (Index (Synset Validated))
--- [ ] not validating if there are two things with the same reference
-validateIndex index = foldWithKey go (Success empty) index
-  where
-    go key (Left headWordKey) result = insert key (Left headWordKey) <$> result
-    go key (Right synset)     result = insert key . Right <$> checkSynset' synset <*> result
-    checkSynset' = checkSynset index
+-- validateIndex :: UnvalidatedIndex -> SourceValidation (Index (Synset Unvalidated))
+-- -- check duplicate references
+-- validateIndex = foldWithKey go (Success empty)
+--   where
+--     go key (Left headWordKey :| []) result = insert key (Left headWordKey) <$> result
+--     go key (Right synset :| [])     result = insert key (Right synset) <$> result
+--     go _ references result -- more than one reference
+--       = Failure (NE.map toDuplicateReference references) <*> result
+--     toDuplicateReference  (Right Synset{wordSenses = WNWord (WordSenseIdentifier identifier) _ _ :| _})
+--       = DuplicateReference identifier
 
 
 validateSynsetsInIndex :: Index (Synset Unvalidated)
