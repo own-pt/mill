@@ -28,6 +28,7 @@ import Data.RDF.Encoder.NQuads (encodeRDFGraph)
 import Data.RDF.ToRDF (toTriples)
 import Data.RDF.Types (RDFGraph(..), IRI(..))
 import Data.Semigroup (sconcat)
+import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -36,7 +37,6 @@ import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>), takeDirectory,normalise,equalFilePath)
 import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
-
 
 parseLexicographerFile :: FilePath -> IO (SourceValidation (NonEmpty (Synset Unvalidated)))
 parseLexicographerFile filePath = do
@@ -145,27 +145,24 @@ validateLexicographerFiles filesDirectory = do
     Success lexFilesSynsets
       -> validateSynsetsNoParseErrors lexFilesSynsets Nothing
 
-wn30 :: IRI
-wn30 = "https://w3id.org/own-pt/wn30-en/"
-
-synsetsToTriples :: NonEmpty (Synset Validated) -> FilePath -> IO ()
-synsetsToTriples synsets outputFile =
+synsetsToTriples :: IRI -> NonEmpty (Synset Validated) -> FilePath -> IO ()
+synsetsToTriples baseIRI synsets outputFile =
   encodeFile outputFile
   . toLazyByteString
   . encodeRDFGraph $ RDFGraph Nothing synsetsTriples
   where
-    synsetsTriples = concatMap (toTriples wn30) synsets
+    synsetsTriples = concatMap (toTriples baseIRI) synsets
 
-lexicographerFilesToTriples :: NonEmpty FilePath -> FilePath -> IO ()
-lexicographerFilesToTriples fileNames outputFile = do
+lexicographerFilesToTriples :: IRI -> NonEmpty FilePath -> FilePath -> IO ()
+lexicographerFilesToTriples baseIRI fileNames outputFile = do
   synsetsValid <- parseLexicographerFiles fileNames
   case synsetsValid of
-    (Success synsets) -> synsetsToTriples synsets outputFile
+    (Success synsets) -> synsetsToTriples baseIRI synsets outputFile
     (Failure _) -> void
       $ putStrLn "Errors in lexicographer files, please validate them before exporting."
 
-lexicographerFilesInDirectoryToTriples :: FilePath -> FilePath -> IO ()
-lexicographerFilesInDirectoryToTriples lexicographerDir outputFile = do
+lexicographerFilesInDirectoryToTriples :: String -> FilePath -> FilePath -> IO ()
+lexicographerFilesInDirectoryToTriples baseIriString lexicographerDir outputFile = do
   lexicographerFiles <- lexicographerFilesInDirectory lexicographerDir
-  lexicographerFilesToTriples lexicographerFiles outputFile
+  lexicographerFilesToTriples (fromString baseIriString) lexicographerFiles outputFile
   
