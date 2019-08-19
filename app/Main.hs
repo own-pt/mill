@@ -10,7 +10,10 @@ import Options.Applicative (customExecParser, prefs, ParserInfo, Parser, showHel
                            , argument, str, help, metavar, header)
 
 data Command = Validate FilePath
-  | ExportCommand FilePath FilePath deriving Show
+  | ExportCommand String   -- baseIRI
+                  FilePath -- lexicographer directory
+                  FilePath -- output file
+             deriving Show
 
 showHelpOnErrorExecParser :: ParserInfo a -> IO a
 showHelpOnErrorExecParser = customExecParser (prefs showHelpOnError)
@@ -36,8 +39,10 @@ parseValidateCommand = Validate <$> validateParser
       (metavar "PATH" <> help "Validates one lexicographer file in case PATH is a file, else validates all lexicographer files in directory. Assumes lexnames.tsv is in the same PATH")
 
 parseExportCommand :: Parser Command
-parseExportCommand = ExportCommand <$> lexDirectory <*> outputFile
+parseExportCommand = ExportCommand <$> baseIRI <*> lexDirectory <*> outputFile
   where
+    baseIRI = argument str
+      (metavar "IRI" <> help "Base IRI for RDF nodes")
     lexDirectory = argument str
       (metavar "DIR" <> help "Directory where lexicographer files to export are in")
     outputFile = argument str
@@ -61,5 +66,5 @@ main = do
       if isDirectory
         then validateLexicographerFiles filepath
         else validateLexicographerFile filepath
-    (ExportCommand lexDirectory outputFile) ->
-      lexicographerFilesInDirectoryToTriples lexDirectory outputFile
+    (ExportCommand baseIri lexDirectory outputFile) ->
+      lexicographerFilesInDirectoryToTriples baseIri lexDirectory outputFile
