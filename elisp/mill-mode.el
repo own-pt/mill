@@ -1,6 +1,6 @@
 ;;; conllu-mode.el --- editing mode for edit wordnet data in human-readable text format files  -*- lexical-binding: t; -*-
 
-;; dependecies
+;; dependencies
 
 (require 'mill-flymake)
 (require 'xref)
@@ -64,46 +64,40 @@
 	(buffer-substring beg end))))
 
 
-(defun mill-xref-collect-matches (regexp file) ;; TODO: document
-  ;; inspired by `xref-collect-matches'
-  (let ((command (format "grep -n -e \"%s\" %s" regexp file)) ;; TODO: grep adds external dependece, remove?
-	(def default-directory)
-	(grep-re "^\\([0-9]+\\):\\(.*\\)")
-	(status)
-	(hits))
-    (with-current-buffer (get-buffer-create " *xref-mill-grep*")
-      (erase-buffer)
-      (setq default-directory def)
-      (setq status
-            (call-process-shell-command command nil t))
-      (goto-char (point-min))
-
-      (when (and (/= (point-min) (point-max))
-                 (not (looking-at grep-re)))
-        (user-error "Search failed with status %d: %s" status (buffer-string)))
-
-      (cl-loop while (re-search-forward  grep-re nil t)
-	       collect (xref-make (match-string 2)
-				  (xref-make-file-location file
-							   (string-to-number (match-string 1))
-							   0))
-	       into hits
-	       finally (return hits)))))
-
-
 (cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
-  (let ((ident (string-trim identifier)))
-    (string-match "\\(\\(.*\\):\\(\\sw+\\)\\|\\(\\sw+\\)\\) *\\([0-9]*\\)" ident)
-    (let ((file (if (match-string 2 ident)
-		    (format "%s%s" default-directory (match-string 2 ident))
-		  (buffer-file-name)))
-	  (word (or (match-string 3 ident) (match-string 4 ident)))
-	  (position (match-string 5 ident)))
-      (mill-xref-collect-matches
-       (if (string-empty-p position)
-	   (concatenate 'string "^w: \\+" word "\\( *$\\| \\+[^0-9]\\+.*\\)")
-	 (concatenate 'string "^w: \\+" word " \\+" position))
-       file))))
+  (pcase (string-trim identifier)
+    ((rx (let maybe-lex-name (optional (or "noun" "adjs" "adj" "adv" "verb")
+				 "."
+				 (one-or-more (not (any ?:)))
+				 ":"))
+	 (let lex-form (one-or-more (not (any ? ))))
+	 (let maybe-lex-id   (optional (one-or-more (char digit)))))
+     (let ((lex-file (if (string-empty-p maybe-lex-name)
+			 (buffer-file-name)
+		       (format "%s%s" default-directory
+			       (string-trim-right maybe-lex-name ":"))))
+	   (lex-id (unless (string-empty-p maybe-lex-id) maybe-lex-id)))
+       (mill--collect-xref-matches lex-file
+				   lex-form
+				   lex-id)))))
+
+(defun mill--collect-xref-matches (file lexical-form &optional lexical-id)
+  (with-temp-buffer
+    (insert-file-contents file)
+    (let ((line 1)
+	  (regexp (if lexical-id
+		      (rx-to-string `(seq line-start "w: " ,lexical-form " " ,lexical-id))
+		    (rx-to-string `(seq line-start "w: " ,lexical-form
+					(or (seq (zero-or-more " ") line-end) " ")))))
+	  (matches nil))
+      (while (not (eobp))
+	(when (looking-at regexp)
+	  (push (xref-make (thing-at-point 'line)
+			   (xref-make-file-location file line 0))
+		matches))
+	(forward-line 1)
+	(cl-incf line))
+      (nreverse matches))))
 
 
 ;; ident
