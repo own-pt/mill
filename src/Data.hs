@@ -147,7 +147,13 @@ wnIdentifierToIRI :: Text -> (LexicographerFileId, WordSenseForm, LexicalId) -> 
 wnIdentifierToIRI prefix (lexicographerFileId, WordSenseForm wForm, LexicalId lId) =
   go <$> ask
   where
-    go baseIri = baseIri {iriPath = T.concat [prefix, "-", lexicographerFileIdToText lexicographerFileId, "-", wForm, "-", T.pack $ show lId]}
+    go baseIri@IRI{iriPath}
+      = baseIri { iriPath = T.concat [ iriPath
+                                     , prefix, "-"
+                                     , lexicographerFileIdToText lexicographerFileId
+                                     , "-", wForm, "-", T.pack $ show lId
+                                     ]
+                }
 
 wordSenseIdIRI :: WordSenseIdentifier -> RDFGen IRI
 wordSenseIdIRI (WordSenseIdentifier wnIdentifier) =
@@ -191,7 +197,9 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples
   where
     wordSenseIRI (WNWord wordSenseId _ _) = wordSenseIdIRI wordSenseId
     wordSenses' = NE.toList wordSenses
-    makePredicate path = fmap Predicate . appBaseIRI $ Endo (\baseIri -> baseIri {iriPath = path})
+    makePredicate path
+      = fmap Predicate . appBaseIRI
+      $ Endo (\baseIri@IRI{iriPath} -> baseIri {iriPath = T.append iriPath path})
     synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
     headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier)
       $ NE.head wordSenses
