@@ -88,7 +88,8 @@
 	  (regexp (if lexical-id
 		      (rx-to-string `(seq line-start "w: " ,lexical-form " " ,lexical-id))
 		    (rx-to-string `(seq line-start "w: " ,lexical-form
-					(or (seq (zero-or-more " ") line-end) " ")))))
+					(or (seq (zero-or-more " ") line-end)
+					    (seq " " (not (any digit))))))))
 	  (matches nil))
       (while (not (eobp))
 	(when (looking-at regexp)
