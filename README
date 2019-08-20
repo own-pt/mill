@@ -61,6 +61,7 @@ example, we only check if synsets are sorted after checking that their
 words are themselves sorted (if they are not, there's not point in
 checking if the synsets are sorted).
 
+
 * Why the name mill?
 =mill= aims to fulfill the same role that =grind= once did. It's been
 named =mill= because it's a synonym of =grind= and is also a prefix of

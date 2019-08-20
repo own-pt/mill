@@ -88,12 +88,13 @@ instance Semigroup e => Applicative (Validation e) where
 data WNError
   = ParseError String
   | DuplicateWordSense String
+  | DuplicateSynsetWords (NonEmpty Text)
   | DuplicateWordRelation (NonEmpty WordPointer)
   | DuplicateSynsetRelation (NonEmpty SynsetRelation)
   | MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
   | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
-  | UnsortedWordSenses (NonEmpty (NonEmpty WNWord))
+  | UnsortedWordSenses (NonEmpty (NonEmpty Text))
   | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
   deriving (Show)
@@ -138,6 +139,8 @@ instance Pretty WNError where
   pretty (ParseError errorString) = pretty errorString
   pretty (DuplicateWordSense sensekey)
     = prettyDuplicate "wordsense" (singleton sensekey)
+  pretty (DuplicateSynsetWords synsetWords)
+    = prettyDuplicate "synset words" synsetWords
   pretty (DuplicateWordRelation wordPointers)
     = prettyDuplicate "word pointer" wordPointers
   pretty (DuplicateSynsetRelation synsetRelations)
@@ -239,12 +242,13 @@ checkSortNoDuplicates toSortError toDuplicateError = sortedCheckNoDuplicates . v
 
 checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
 checkWordSenses index wordSenses
-  =  checkWordSensesOrder
+  =  checkWordSensesOrderNoDuplicates
   *> traverse (checkWordSense index) wordSenses
   *> Success wordSenses
   where
-    checkWordSensesOrder
-      = bimap (singleton . UnsortedWordSenses) id . validateSorted $ NE.toList wordSenses
+    checkWordSensesOrderNoDuplicates
+      = checkSortNoDuplicates UnsortedWordSenses DuplicateSynsetWords . map wordSenseLexicalForm $ NE.toList wordSenses
+    wordSenseLexicalForm (WNWord (WordSenseIdentifier (_,WordSenseForm lexicalForm,_)) _ _) = lexicalForm
 
 checkWordSense :: Index a -> WNWord -> WNValidation WNWord
 checkWordSense index wordSense@(WNWord _ _ wordPointers)
