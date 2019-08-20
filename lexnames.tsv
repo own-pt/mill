@@ -1,5 +1,5 @@
 lexicographer_id	lexicographer_file	description
-0	adj.all	all adjective clusters
+0	adj.all	all heads of adjective clusters
 1	adj.pert	relational adjectives (pertainyms)
 2	adv.all	all adverbs
 3	noun.Tops	unique beginner for nouns
@@ -44,3 +44,4 @@ lexicographer_id	lexicographer_file	description
 42	verb.stative	verbs of being, having, spatial relations
 43	verb.weather	verbs of raining, snowing, thawing, thundering
 44	adj.ppl	participial adjectives
+45	adjs.all	all satellites of adjective clusters
