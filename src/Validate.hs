@@ -5,6 +5,10 @@ module Validate
   , SourceValidation
   , SourceError(..)
   , WNError (..)
+  , RawIndex
+  , wordSenseKey
+  , senseKey
+  , singleton
   ) where
 
 import Data
@@ -28,8 +32,9 @@ singleton x = x :| []
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
 type Index a = Trie String (Either String a) -- Left is a reference to another key
+type RawIndex = Trie String (NonEmpty (Either String (Synset Unvalidated)))
 
-makeIndex :: NonEmpty (Synset Unvalidated) -> Trie String (NonEmpty (Either String (Synset Unvalidated)))
+makeIndex :: NonEmpty (Synset Unvalidated) -> RawIndex
 makeIndex synsets = fromListWith' (<>) keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
@@ -38,7 +43,7 @@ makeIndex synsets = fromListWith' (<>) keyValuePairs
       in
         (headSenseKey, singleton $ Right synset) : map (\wordSense -> (wordSenseKey wordSense, singleton $ Left headSenseKey)) wordSenses
 
-checkIndexNoDuplicates :: Trie String (NonEmpty (Either String (Synset Unvalidated))) -> SourceValidation (Index (Synset Unvalidated))
+checkIndexNoDuplicates :: RawIndex -> SourceValidation (Index (Synset Unvalidated))
 checkIndexNoDuplicates index = foldWithKey go (Success empty) index
   where
     go key (value :| []) noDuplicatesTrie
@@ -57,12 +62,12 @@ checkIndexNoDuplicates index = foldWithKey go (Success empty) index
           _ -> Nothing
 
 wordSenseKey :: WNWord -> String
-wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _)
-  = senseKey lexicographerFileId wordForm lexicalId
+wordSenseKey (WNWord (WordSenseIdentifier wnIdentifier) _ _)
+  = senseKey wnIdentifier
 
-senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
+senseKey :: (LexicographerFileId, WordSenseForm, LexicalId) -> String
 -- [ ] this is not really a sense key
-senseKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
+senseKey (LexicographerFileId (pos, lexname), WordSenseForm wordForm, LexicalId lexicalId) =
   intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, show lexicalId]
 
 ---- validation
@@ -201,12 +206,12 @@ checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
-    checkSynsetRelation synsetRelation@(SynsetRelation _ (SynsetIdentifier (lexFileId, wordForm, lexicalId))) =
+    checkSynsetRelation synsetRelation@(SynsetRelation _ (SynsetIdentifier wnIdentifier)) =
       if member targetSenseKey index
       then Success synsetRelation
       else Failure (MissingSynsetRelationTarget synsetRelation :| []) -- []
       where
-        targetSenseKey = senseKey lexFileId wordForm lexicalId
+        targetSenseKey = senseKey wnIdentifier
 
 validateSorted :: Ord a => [a] -> Validation (NonEmpty (NonEmpty a)) [a]
 -- maybe just sort input instead of picking some of the errors?
@@ -264,15 +269,15 @@ checkWordSensePointersTargets :: Index a -> [WordPointer]
   -> WNValidation [WordPointer]
 checkWordSensePointersTargets index = traverse checkWordPointer
   where
-    checkWordPointer wordPointer@(WordPointer _ (WordSenseIdentifier (lexFileId, wordForm, lexicalId))) =
+    checkWordPointer wordPointer@(WordPointer _ (WordSenseIdentifier wnIdentifier)) =
       -- check pointer name too
       if member targetSenseKey index
       then Success wordPointer
       else Failure (MissingWordRelationTarget wordPointer :| []) -- []
       where
-        targetSenseKey = senseKey lexFileId wordForm lexicalId
+        targetSenseKey = senseKey wnIdentifier
 
-validateSynsets :: Trie String (NonEmpty (Either String (Synset Unvalidated)))
+validateSynsets :: RawIndex
   -> NonEmpty (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
 validateSynsets indexWithDuplicates (firstSynset:|synsets) =

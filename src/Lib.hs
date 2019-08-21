@@ -1,17 +1,24 @@
 module Lib
     ( parseLexicographerFile
     , parseLexicographerFiles
-    , validateLexicographerFile
     , validateLexicographerFiles
+    , validateLexicographerFile
+    , validateLexicographerFilesSynsets
     , lexicographerFilesToTriples
     , readConfig
     , lexicographerFilesInDirectoryToTriples
+    , findReferencesOf
     ) where
 
-import Data (Synset,Unvalidated,Validated)
+import Data ( Synset(..),Unvalidated,Validated,WNWord(..),LexicographerFileId
+            , WordSenseForm, LexicalId, WordPointer(..),SynsetRelation(..)
+            , WordSenseIdentifier(..),SynsetIdentifier(..), SourcePosition(..)
+            )
 import Parse (parseLexicographer)
 import Validate ( Validation(..), makeIndex
-                , validateSynsets, SourceValidation)
+                , validateSynsets, SourceValidation
+                , senseKey, singleton
+                )
 ----------------------------------
 import Control.Monad (unless,(>>))
 import Data.Binary (encodeFile)
@@ -35,8 +42,10 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Text.Read as TR
 import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>), takeDirectory,normalise,equalFilePath)
-import Data.Text.Prettyprint.Doc (Pretty(..))
+import Data.Text.Prettyprint.Doc (Pretty(..), colon)
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
+import Data.GenericTrie (Trie, fromListWith', lookup)
+import Prelude hiding (lookup)
 
 parseLexicographerFile :: FilePath -> IO (SourceValidation (NonEmpty (Synset Unvalidated)))
 parseLexicographerFile filePath = do
@@ -44,16 +53,25 @@ parseLexicographerFile filePath = do
   let result = parseLexicographer filePath content
   return result
 
-parseLexicographerFiles :: NonEmpty FilePath
-  -> IO (SourceValidation (NonEmpty (Synset Validated)))
+parseLexicographerFiles :: NonEmpty FilePath -> IO (SourceValidation (NonEmpty (Synset Unvalidated)))
 parseLexicographerFiles filePaths = do
   lexFilesSynsetsOrErrors <- mapM parseLexicographerFile filePaths
   case sequenceA lexFilesSynsetsOrErrors of
     Success lexFilesSynsets ->
       let synsets = sconcat lexFilesSynsets
-          index   = makeIndex synsets
+      in return $ Success synsets
+    Failure sourceErrors -> return $ Failure sourceErrors
+
+validateLexicographerFilesSynsets :: NonEmpty FilePath
+  -> IO (SourceValidation (NonEmpty (Synset Validated)))
+validateLexicographerFilesSynsets filePaths = do
+  lexFileSynsetsOrErrors <- parseLexicographerFiles filePaths
+  case lexFileSynsetsOrErrors of
+    Success synsets ->
+      let index   = makeIndex synsets
       in return $ validateSynsets index synsets
     Failure sourceErrors -> return $ Failure sourceErrors
+
 
 data Config = Config
   { lexnamesToId :: Map Text Int
@@ -117,7 +135,7 @@ validateSynsetsNoParseErrors indexSynsets maybeSynsetsToValidate =
   in case validateSynsets index (fromMaybe synsets maybeSynsetsToValidate) of
     Success _ -> return ()
     Failure errors -> prettyPrintList errors
-    
+
 validateLexicographerFile :: FilePath -> IO ()
 validateLexicographerFile filePath = do
   let normalFilePath = normalise filePath
@@ -155,7 +173,7 @@ synsetsToTriples baseIRI synsets outputFile =
 
 lexicographerFilesToTriples :: IRI -> NonEmpty FilePath -> FilePath -> IO ()
 lexicographerFilesToTriples baseIRI fileNames outputFile = do
-  synsetsValid <- parseLexicographerFiles fileNames
+  synsetsValid <- validateLexicographerFilesSynsets fileNames
   case synsetsValid of
     (Success synsets) -> synsetsToTriples baseIRI synsets outputFile
     (Failure _) -> void
@@ -165,4 +183,50 @@ lexicographerFilesInDirectoryToTriples :: String -> FilePath -> FilePath -> IO (
 lexicographerFilesInDirectoryToTriples baseIriString lexicographerDir outputFile = do
   lexicographerFiles <- lexicographerFilesInDirectory lexicographerDir
   lexicographerFilesToTriples (fromString baseIriString) lexicographerFiles outputFile
-  
+
+newtype ReferencePosition = ReferencePosition (LexicographerFileId, SourcePosition)
+instance Pretty ReferencePosition where
+  pretty (ReferencePosition (lexFileId, SourcePosition (beginPoint, _)))
+    = pretty lexFileId <> colon <> pretty beginPoint
+
+getReferencesInSynset :: Synset a -> [(String, NonEmpty ReferencePosition)]
+getReferencesInSynset Synset{sourcePosition, lexicographerFileId
+                            , wordSenses, relations}
+  = referencesInWordSenses ++ referencesInRelations relations
+  where
+    referenceCoordinates = singleton $ ReferencePosition (lexicographerFileId, sourcePosition)
+    referencesInWordSenses
+      = concatMap referencesInWordSense wordSenses
+    referencesInWordSense (WNWord _ _ wordPointers)
+      = map wordPointersReferences wordPointers
+    wordPointersReferences (WordPointer _ (WordSenseIdentifier wnIdentifier))
+      = (senseKey wnIdentifier, referenceCoordinates)
+    referencesInRelations
+      = map relationReference
+    relationReference (SynsetRelation _ (SynsetIdentifier wnIdentifier))
+      = (senseKey wnIdentifier, referenceCoordinates)
+
+type ReferenceIndex = Trie String (NonEmpty ReferencePosition)
+
+makeReferenceIndex :: NonEmpty (Synset a) -> ReferenceIndex
+makeReferenceIndex synsets = fromListWith' (<>) keyValuePairs
+  where
+    keyValuePairs = concatMap getReferencesInSynset synsets
+
+findReferencesInIndex :: (LexicographerFileId, WordSenseForm, LexicalId) -> ReferenceIndex
+  -> [ReferencePosition]
+findReferencesInIndex wnIdentifier index
+  = maybe [] NE.toList $ lookup needleSenseKey index
+  where
+    needleSenseKey = senseKey wnIdentifier
+
+findReferencesOf :: (LexicographerFileId, WordSenseForm, LexicalId) -> FilePath -> IO ()
+findReferencesOf wnIdentifier filesDirectory = do
+  lexFilesPaths <- lexicographerFilesInDirectory filesDirectory
+  lexFileSynsetsOrErrors <- parseLexicographerFiles lexFilesPaths
+  case lexFileSynsetsOrErrors of
+    Success lexFilesSynsets -> let referenceIndex = makeReferenceIndex lexFilesSynsets
+                               in case findReferencesInIndex wnIdentifier referenceIndex of
+                                    [] -> return ()
+                                    x:references -> prettyPrintList (x:|references)
+    Failure _ -> TIO.putStrLn "error: There are source errors in the files specified"

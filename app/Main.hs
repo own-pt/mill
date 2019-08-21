@@ -1,8 +1,11 @@
 module Main where
 
+import Data (LexicographerFileId(..), WordSenseForm(..), LexicalId(..))
 import Lib ( validateLexicographerFile
            , validateLexicographerFiles
-           , lexicographerFilesInDirectoryToTriples)
+           , lexicographerFilesInDirectoryToTriples
+           , findReferencesOf
+           )
 
 import System.Directory (doesDirectoryExist)
 import Options.Applicative (customExecParser, prefs, ParserInfo, Parser, showHelpOnError
@@ -10,6 +13,7 @@ import Options.Applicative (customExecParser, prefs, ParserInfo, Parser, showHel
                            , argument, str, help, metavar, header)
 
 data Command = Validate FilePath
+  | FindReferencesOf (LexicographerFileId, WordSenseForm, LexicalId) FilePath
   | ExportCommand String   -- baseIRI
                   FilePath -- lexicographer directory
                   FilePath -- output file
@@ -21,16 +25,19 @@ showHelpOnErrorExecParser = customExecParser (prefs showHelpOnError)
 parseCommand :: Parser Command
 parseCommand = subparser $
   -- validate
-  command
-   "validate"
+  command "validate"
    (info (helper <*> parseValidateCommand)
    (fullDesc <> progDesc "Validate lexicographer files"))
   <>
   -- export
-  command
-   "export"
+  command "export"
    (info (helper <*> parseExportCommand)
    (fullDesc <> progDesc "Export lexicographer files"))
+  <>
+  -- find references of identifier
+  command "references"
+   (info (helper <*> parseReferencesOfCommand)
+   (fullDesc <> progDesc "Find references of an identifier"))
 
 parseValidateCommand :: Parser Command
 parseValidateCommand = Validate <$> validateParser
@@ -47,6 +54,13 @@ parseExportCommand = ExportCommand <$> baseIRI <*> lexDirectory <*> outputFile
       (metavar "DIR" <> help "Directory where lexicographer files to export are in")
     outputFile = argument str
       (metavar "FILE" <> help "Output file path")
+
+parseReferencesOfCommand :: Parser Command
+parseReferencesOfCommand = FindReferencesOf <$> identifierParser <*> wnPathParser
+  where
+    identifierParser = _
+    wnPathParser = argument str
+                   (metavar "PATH" <> help "PATH to the directory where the lexicographer files are in. Assumes lexnames.tsv is in the same PATH")
 
 millProgDesc :: String
 millProgDesc =
@@ -66,5 +80,7 @@ main = do
       if isDirectory
         then validateLexicographerFiles filepath
         else validateLexicographerFile filepath
+    (FindReferencesOf wnIdentifier wnPath) ->
+      findReferencesOf wnIdentifier wnPath
     (ExportCommand baseIri lexDirectory outputFile) ->
       lexicographerFilesInDirectoryToTriples baseIri lexDirectory outputFile
