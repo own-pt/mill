@@ -132,7 +132,7 @@ lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) =
 lexicographerFileIdFromText :: Text -> Maybe LexicographerFileId
 lexicographerFileIdFromText = go . T.breakOn "."
   where
-    wrap pos name = Just $ LexicographerFileId (pos, name)
+    wrap pos name = Just $ LexicographerFileId (pos, T.tail name)
     go ("noun",name) = wrap N name
     go ("verb",name) = wrap V name
     go ("adj",name)  = wrap A name

@@ -2,12 +2,15 @@ module Main where
 
 import Lib ( validateLexicographerFile
            , validateLexicographerFiles
-           , lexicographerFilesInDirectoryToTriples)
+           , lexicographerFilesInDirectoryToTriples
+           , readConfig )
 
-import System.Directory (doesDirectoryExist)
-import Options.Applicative (customExecParser, prefs, ParserInfo, Parser, showHelpOnError
+import Control.Monad.Reader (ReaderT(..))
+import Options.Applicative ( customExecParser, prefs, ParserInfo, Parser, showHelpOnError
                            , command, subparser, info, helper, fullDesc, progDesc
-                           , argument, str, help, metavar, header)
+                           , argument, str, help, metavar, header )
+import System.Directory (doesDirectoryExist)
+import System.FilePath (takeDirectory)
 
 data Command = Validate FilePath
   | ExportCommand String   -- baseIRI
@@ -63,8 +66,11 @@ main = do
   case commandToRun of
     Validate filepath -> do
       isDirectory <- doesDirectoryExist filepath
-      if isDirectory
-        then validateLexicographerFiles filepath
-        else validateLexicographerFile filepath
-    (ExportCommand baseIri lexDirectory outputFile) ->
-      lexicographerFilesInDirectoryToTriples baseIri lexDirectory outputFile
+      config <- readConfig $ takeDirectory filepath
+      runReaderT (if isDirectory
+                  then validateLexicographerFiles
+                  else validateLexicographerFile filepath)
+        config
+    (ExportCommand baseIri lexDirectory outputFile) -> do
+      config <- readConfig lexDirectory
+      runReaderT (lexicographerFilesInDirectoryToTriples baseIri outputFile) config
