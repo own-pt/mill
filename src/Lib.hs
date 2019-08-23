@@ -9,7 +9,7 @@ module Lib
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
-            , SynsetRelation(..), WNWord(..), WordPointer(..) )
+            , synsetToTriples )
 import Parse (parseLexicographer)
 import Validate ( Validation(..), makeIndex
                 , validateSynsets, SourceValidation)
@@ -18,6 +18,7 @@ import Control.Monad (unless,(>>))
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
+import qualified Data.DList as DL
 import Data.Either (partitionEithers)
 import Data.Functor(void)
 import Data.List (partition)
@@ -27,7 +28,7 @@ import Data.Maybe (fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
-import Data.RDF.ToRDF (toTriples)
+import Data.RDF.ToRDF (runRDFGen)
 import Data.RDF.Types (RDFGraph(..), IRI(..))
 import Data.Semigroup (sconcat)
 import Data.String (fromString)
@@ -148,22 +149,9 @@ synsetsToTriples :: Map Text Text
 synsetsToTriples relationsMap baseIRI synsets outputFile =
   encodeFile outputFile
   . toLazyByteString
-  . encodeRDFGraph $ RDFGraph Nothing synsetsTriples
+  . encodeRDFGraph . RDFGraph Nothing $ DL.toList synsetsTriples
   where
-    synsetsTriples = concatMap (toTriples baseIRI) $ NE.map mapRelationNames synsets
-    mapRelationNames :: Synset Validated -> Synset Validated
-    mapRelationNames synset@Synset{wordSenses, relations} =
-      synset{ wordSenses = NE.map mapWordRelations wordSenses
-            , relations  = map mapRelation relations }
-    mapRelationName relationName =
-      fromMaybe (error $ "Inexisting relation " ++ T.unpack relationName)
-                $ M.lookup relationName relationsMap
-    mapRelation (SynsetRelation relationName synsetId) =
-      SynsetRelation (mapRelationName relationName) synsetId
-    mapWordRelations (WNWord wordSenseId frames wordPointers) =
-      WNWord wordSenseId frames $ map mapWordPointer wordPointers
-    mapWordPointer (WordPointer pointerName wordSenseId) =
-      WordPointer (mapRelationName pointerName) wordSenseId
+    synsetsTriples = foldMap (\synset -> runRDFGen (synsetToTriples relationsMap synset) baseIRI) synsets
 
 lexicographerFilesToTriples :: IRI -> FilePath -> App ()
 lexicographerFilesToTriples baseIRI outputFile = do

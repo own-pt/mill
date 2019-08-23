@@ -1,27 +1,33 @@
 lexicographer file	text file	rdf	pos	domain	description
-!	ant	antonymOf	nvar	word	Antonym
-#m	hm	memberHolonymOf	n	synset	Member holonym
-#p	hp	partHolonymOf	n	synset	Part holonym
-#s	hs	substanceHolonymOf	n	synset	Substance holonym
-$	vg	sameVerbGroupAs	v	synset,word	Verb Group
-%m	mm	memberMeronymOf	n	synset	Member meronym
-%p	mp	partMeronymOf	n	synset	Part meronym
-%s	ms	substanceMeronymOf	n	synset	Substance meronym
-&	sim	similarTo	a	synset	Similar to
-*	entail	entails	v	synset	entailment
-+	drf	derivationallyRelated	nv	synset,word	Derivationally related form
--c	mt	classifiedByTopic	nvar	synset,word	Member of this domain - TOPIC
--r	mr	classifiedByRegion	nvar	synset,word	Member of this domain - REGION
--u	mu	classifiedByUsage	nvar	synset,word	Member of this domain - USAGE
-;c	dt	classifiesByTopic	n	synset,word	Domain of synset - TOPIC
-;r	dr	classifiesByRegion	n	synset,word	Domain of synset - REGION
-;u	du	classifiesByUsage	n	synset,word	Domain of synset - USAGE
-<	pv	participleOf	a	word	Participle of verb
-=	attr	attribute	na	synset	Attribute
->	cause	causes	v	synset	Cause
-@	hyper	hypernymOf	nv	synset	Hypernym
-@i	ihyper	instanceOf	n	synset	Instance Hypernym (9/11 is a terrorist attack)
-\	pe	pertainsTo	ar	word	Pertainym pertains to noun/adjective
-^	see	seeAlso	va	synset,word	Also see
-~	hypo	hyponymOf	nv	synset	Hyponym
-~i	ihypo	hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)
+!	ant	wn30/own-pt/schema/antonymOf	nvar	word	Antonym
+#m	hm	wn30/own-pt/schema/memberHolonymOf	n	synset	Member holonym
+#p	hp	wn30/own-pt/schema/partHolonymOf	n	synset	Part holonym
+#s	hs	wn30/own-pt/schema/substanceHolonymOf	n	synset	Substance holonym
+$	vg	wn30/own-pt/schema/sameVerbGroupAs	v	synset,word	Verb Group
+%m	mm	wn30/own-pt/schema/memberMeronymOf	n	synset	Member meronym
+%p	mp	wn30/own-pt/schema/partMeronymOf	n	synset	Part meronym
+%s	ms	wn30/own-pt/schema/substanceMeronymOf	n	synset	Substance meronym
+&	sim	wn30/own-pt/schema/similarTo	a	synset	Similar to
+*	entail	wn30/own-pt/schema/entails	v	synset	entailment
++	drf	wn30/own-pt/schema/derivationallyRelated	nv	synset,word	Derivationally related form
+-c	mt	wn30/own-pt/schema/classifiedByTopic	nvar	synset,word	Member of this domain - TOPIC
+-r	mr	wn30/own-pt/schema/classifiedByRegion	nvar	synset,word	Member of this domain - REGION
+-u	mu	wn30/own-pt/schema/classifiedByUsage	nvar	synset,word	Member of this domain - USAGE
+;c	dt	wn30/own-pt/schema/classifiesByTopic	n	synset,word	Domain of synset - TOPIC
+;r	dr	wn30/own-pt/schema/classifiesByRegion	n	synset,word	Domain of synset - REGION
+;u	du	wn30/own-pt/schema/classifiesByUsage	n	synset,word	Domain of synset - USAGE
+<	pv	wn30/own-pt/schema/participleOf	a	word	Participle of verb
+=	attr	wn30/own-pt/schema/attribute	na	synset	Attribute
+>	cause	wn30/own-pt/schema/causes	v	synset	Cause
+@	hyper	wn30/own-pt/schema/hypernymOf	nv	synset	Hypernym
+@i	ihyper	wn30/own-pt/schema/instanceOf	n	synset	Instance Hypernym (9/11 is a terrorist attack)
+\	pe	wn30/own-pt/schema/pertainsTo	ar	word	Pertainym pertains to noun/adjective
+^	see	wn30/own-pt/schema/seeAlso	va	synset,word	Also see
+~	hypo	wn30/own-pt/schema/hyponymOf	nv	synset	Hyponym
+~i	ihypo	wn30/own-pt/schema/hyponymOf/hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)
+_	lexicographerFile	wn30/own-pt/schema/lexicographerFile	nvar	synset	lexicographer file relation
+_	definition	wn30/own-pt/schema/definition	nvar	synset	definition relation
+_	example	wn30/own-pt/schema/example	nvar	synset	example relation
+_	containsWordSense	wn30/own-pt/schema/containsWordSense	nvar	synset	contains word sense relation
+_	frame	wn30/own-pt/schema/frame	nvar	synset,word	frame relation
+_	lexicalForm	wn30/own-pt/schema/lexicalForm	nvar	synset	lexicographer file relation

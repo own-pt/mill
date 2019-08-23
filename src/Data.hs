@@ -8,8 +8,11 @@ import Control.Monad.Trans.Reader (ask)
 import qualified Data.DList as DL
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty(NonEmpty(..))
+import Data.Map (Map)
+import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
 import Data.Monoid (Endo(..))
-import Data.RDF.ToRDF (ToRDF(..),ToObject(..), RDFGen, appBaseIRI,Triples)
+import Data.RDF.ToRDF (ToObject(..), RDFGen, appBaseIRI,Triples)
 import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
                        IRI(..), Triple(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
@@ -141,7 +144,9 @@ lexicographerFileIdFromText = go . T.breakOn "."
     go _             = Nothing
 
 instance ToObject LexicographerFileId where
-  object lexicographerFileId = pure . LiteralObject $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
+  object lexicographerFileId
+    = pure . LiteralObject
+    $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
 
 wnIdentifierToIRI :: Text -> (LexicographerFileId, WordSenseForm, LexicalId) -> RDFGen IRI
 wnIdentifierToIRI prefix (lexicographerFileId, WordSenseForm wForm, LexicalId lId) =
@@ -162,9 +167,9 @@ wordSenseIdIRI (WordSenseIdentifier wnIdentifier) =
 synsetIdentifierToIRI :: SynsetIdentifier -> RDFGen IRI
 synsetIdentifierToIRI (SynsetIdentifier wnIdentifier) = wnIdentifierToIRI "synset" wnIdentifier
 
-synsetToTriples :: Synset Validated -> RDFGen Triples
-synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples
-                      , frames = synsetFrames, relations} = do
+synsetToTriples :: Map Text Text -> Synset Validated -> RDFGen Triples
+synsetToTriples relationsMap Synset{lexicographerFileId, wordSenses, definition, examples
+                                   , frames = synsetFrames, relations} = do
   lexicographerFileLiteral   <- object lexicographerFileId
   synsetIri                  <- IRISubject <$> synsetIriGen
   lexicographerFilePredicate <- makePredicate "lexicographerFile"
@@ -197,9 +202,12 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples
   where
     wordSenseIRI (WNWord wordSenseId _ _) = wordSenseIdIRI wordSenseId
     wordSenses' = NE.toList wordSenses
-    makePredicate path
+    makePredicate relationName
       = fmap Predicate . appBaseIRI
-      $ Endo (\baseIri@IRI{iriPath} -> baseIri {iriPath = T.append iriPath path})
+      $ Endo (\baseIri -> baseIri {iriPath = toRDFName relationName})
+    toRDFName relationName =
+      fromMaybe (error $ "Inexisting relation " ++ T.unpack relationName ++ " on relations.tsv")
+            $ M.lookup relationName relationsMap
     synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
     headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier)
       $ NE.head wordSenses
@@ -224,6 +232,3 @@ synsetToTriples Synset{lexicographerFileId, wordSenses, definition, examples
         , zipWith (Triple wordSenseIri) pointersPredicates targetWordSenseObjs
         ]
 
-
-instance ToRDF (Synset Validated) where
-   triples = synsetToTriples
