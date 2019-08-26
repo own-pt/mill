@@ -9,10 +9,10 @@ module Lib
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
-            , synsetToTriples )
+            , synsetToTriples, Validation(..), SourceValidation )
 import Parse (parseLexicographer)
-import Validate ( Validation(..), makeIndex
-                , validateSynsets, SourceValidation)
+import Validate ( makeIndex
+                , validateSynsets )
 ----------------------------------
 import Control.Monad (unless,(>>))
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)

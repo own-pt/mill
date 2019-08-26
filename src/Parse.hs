@@ -1,7 +1,6 @@
 module Parse (parseLexicographer) where
 
 import Data
-import Validate (SourceError(..), WNError(..), SourceValidation, Validation(..))
 
 import Control.Applicative hiding (some,many)
 import qualified Control.Applicative.Combinators.NonEmpty as NC
@@ -39,11 +38,12 @@ parseLexicographer relationsMap fileName inputText =
     Right rawSynsets
       -> case partitionEithers (NE.toList rawSynsets) of
            ([], synsetsToValidate) -> Success $ NE.fromList synsetsToValidate
-           (parseErrors, _) -> Failure . NE.map toSourceError $ NE.fromList parseErrors
+           (parseErrors, _) -> Failure . NE.map parseToSourceError
+                                           $ NE.fromList parseErrors
     Left ParseErrorBundle{bundleErrors} ->
-      Failure . NE.map toSourceError $ bundleErrors
+      Failure . NE.map parseToSourceError $ bundleErrors
   where
-    toSourceError parseError
+    parseToSourceError parseError
       = let errorPos = errorOffset parseError
         in SourceError (T.pack fileName)
                        (SourcePosition (errorPos, errorPos +1))
