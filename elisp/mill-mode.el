@@ -10,7 +10,7 @@
 ;;; fontification
 
 (defconst mill--kwds-defs
-  '("w" "d")
+  '("w" "d" "e")
   "Mill definition keywords.")
 
 (defconst mill--kwds-synset-rel

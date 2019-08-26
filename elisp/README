@@ -6,7 +6,7 @@
 
 #+BEGIN_SRC elisp
 
-  (use-package mill
+  (use-package mill-mode
     :load-path "PATH-TO/mill/elisp/")
 
 #+END_SRC
