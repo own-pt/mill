@@ -25,9 +25,10 @@ $	vg	wn30/own-pt/schema/sameVerbGroupAs	v	synset,word	Verb Group
 ^	see	wn30/own-pt/schema/seeAlso	va	synset,word	Also see
 ~	hypo	wn30/own-pt/schema/hyponymOf	nv	synset	Hyponym
 ~i	ihypo	wn30/own-pt/schema/hyponymOf/hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)
-_	lexicographerFile	wn30/own-pt/schema/lexicographerFile	nvar	synset	lexicographer file relation
-_	definition	wn30/own-pt/schema/definition	nvar	synset	definition relation
-_	example	wn30/own-pt/schema/example	nvar	synset	example relation
-_	containsWordSense	wn30/own-pt/schema/containsWordSense	nvar	synset	contains word sense relation
-_	frame	wn30/own-pt/schema/frame	nvar	synset,word	frame relation
-_	lexicalForm	wn30/own-pt/schema/lexicalForm	nvar	synset	lexicographer file relation
+_	_	wn30/own-pt/schema/lexicographerFile	nvar	synset	lexicographer file relation
+_	d	wn30/own-pt/schema/definition	nvar	synset	definition relation
+_	e	wn30/own-pt/schema/example	nvar	synset	example relation
+_	w	wn30/own-pt/schema/containsWordSense	nvar	synset	contains word sense relation
+_	fs	wn30/own-pt/schema/frame	nvar	synset,word	frame relation
+_	_	wn30/own-pt/schema/lexicalForm	nvar	synset	lexicographer file relation
+_	marker	wn30/own-pt/schema/syntacticMarker	a	word	   marker
