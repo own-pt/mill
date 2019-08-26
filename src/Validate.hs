@@ -1,29 +1,18 @@
 module Validate
   ( validateSynsets
   , makeIndex
-  , Validation(..)
-  , SourceValidation
-  , SourceError(..)
-  , WNError (..)
   ) where
 
 import Data
 
-import Data.Bifunctor (Bifunctor(..))
+import Data.Bifunctor (bimap)
 import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromJust, mapMaybe)
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.GenericTrie (Trie, fromListWith', member, lookup, foldWithKey, empty, insert)
-import Data.Text.Prettyprint.Doc
-  ( Pretty(..),Doc,(<+>), colon, align, hsep, nest
-  , line, indent, vsep)
 import Prelude hiding (lookup)
-
-singleton :: a -> NonEmpty a
-singleton x = x :| []
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
@@ -65,104 +54,7 @@ senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 senseKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
   intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, show lexicalId]
 
----- validation
-data Validation e a = Failure e | Success a deriving (Show,Eq)
 
-instance Functor (Validation e) where
-  fmap _ (Failure e) = Failure e
-  fmap f (Success a) = Success (f a)
-
-instance Bifunctor Validation where
-  bimap f _ (Failure e) = Failure (f e)
-  bimap _ g (Success a) = Success (g a)
-
-instance Semigroup e => Applicative (Validation e) where
-  --  pure :: a -> Validation e a
-  pure = Success
-  --(<*>) :: Validation e (a -> b) -> Validation e a -> Validation e b
-  Success f <*> Success a  = Success (f a)
-  Success _ <*> Failure e  = Failure e
-  Failure e <*> Success _  = Failure e
-  Failure e <*> Failure e' = Failure (e <> e')
-
-data WNError
-  = ParseError String
-  | DuplicateWordSense String
-  | DuplicateSynsetWords (NonEmpty Text)
-  | DuplicateWordRelation (NonEmpty WordPointer)
-  | DuplicateSynsetRelation (NonEmpty SynsetRelation)
-  | MissingSynsetRelationTarget SynsetRelation
-  | MissingWordRelationTarget WordPointer
-  | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
-  | UnsortedWordSenses (NonEmpty (NonEmpty Text))
-  | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
-  | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
-  deriving (Show)
-
-data SourceError
-  = SourceError Text -- ^ name of source file
-                SourcePosition
-                WNError deriving (Show)
-
-toSourceError :: Synset a -> WNError -> SourceError
-toSourceError Synset{sourcePosition, lexicographerFileId}
-  = SourceError (lexicographerFileIdToText lexicographerFileId)
-                sourcePosition
-
-type WNValidation a = Validation (NonEmpty WNError) a
-type SourceValidation a = Validation (NonEmpty SourceError) a
-
----
--- Pretty instances
-prettyMissingTarget :: Text -> Text -> Doc ann -> Doc ann
-prettyMissingTarget relationType relationName target
-  =   "error: Missing"
-  <+> pretty relationType
-  <+> pretty relationName
-  <+> "target" <+> target
-
-prettyUnordered :: Pretty a => Text -> NonEmpty (NonEmpty a) -> Doc ann
-prettyUnordered what sequences
-  = "warning: Unsorted" <+> pretty what <> line
-  <> (indent 2 . align . vsep . map prettyUnorderedSequence $ NE.toList sequences)
-  where
-    prettyUnorderedSequence (x:|xs) =
-      pretty x <+> "should come after" <+> hsep (map pretty xs)
-
-prettyDuplicate :: Pretty a => Text -> NonEmpty a -> Doc ann
-prettyDuplicate what duplicates
-  = "error: Duplicate"
-  <+> pretty what
-  <+> pretty (NE.head duplicates)
-  
-instance Pretty WNError where
-  pretty (ParseError errorString) = pretty errorString
-  pretty (DuplicateWordSense sensekey)
-    = prettyDuplicate "wordsense" (singleton sensekey)
-  pretty (DuplicateSynsetWords synsetWords)
-    = prettyDuplicate "synset words" synsetWords
-  pretty (DuplicateWordRelation wordPointers)
-    = prettyDuplicate "word pointer" wordPointers
-  pretty (DuplicateSynsetRelation synsetRelations)
-    = prettyDuplicate "synset relation" synsetRelations
-  pretty (MissingSynsetRelationTarget (SynsetRelation relationName target))
-    = prettyMissingTarget "synset relation" relationName $ pretty target
-  pretty (MissingWordRelationTarget (WordPointer pointerName target))
-    = prettyMissingTarget "word pointer" pointerName $ pretty target
-  pretty (UnsortedSynsets sequences)
-    = prettyUnordered "synsets" sequences
-  pretty (UnsortedSynsetRelations sequences)
-    = prettyUnordered "synset relations" sequences
-  pretty (UnsortedWordSenses sequences)
-    = prettyUnordered "synset word senses" sequences
-  pretty (UnsortedWordPointers sequences)
-    = prettyUnordered "word pointers" sequences
-
-instance Pretty SourceError where
-  pretty (SourceError lexicographerFileId (SourcePosition (beg, end)) wnError)
-    =   pretty lexicographerFileId
-    <>  colon <> pretty beg <> colon <> pretty end <> colon
-    <+> nest 2 (pretty wnError) <> line
 
 ---
 -- checks

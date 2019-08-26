@@ -1,7 +1,6 @@
 module Parse (parseLexicographer) where
 
 import Data
-import Validate (SourceError(..), WNError(..), SourceValidation, Validation(..))
 
 import Control.Applicative hiding (some,many)
 import qualified Control.Applicative.Combinators.NonEmpty as NC

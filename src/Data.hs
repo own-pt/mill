@@ -5,6 +5,7 @@
 module Data where
 
 import Control.Monad.Trans.Reader (ask)
+import Data.Bifunctor (Bifunctor(..))
 import qualified Data.DList as DL
 import qualified Data.List.NonEmpty as NE
 import Data.List.NonEmpty(NonEmpty(..))
@@ -17,8 +18,12 @@ import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
                        IRI(..), Triple(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc (Pretty(..),Doc,dot,colon,(<+>))
+import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest
+                                 , line, indent, align, vsep, hsep)
 
+
+singleton :: a -> NonEmpty a
+singleton x = x :| []
 
 data WNPOS = A | S | R | N | V deriving (Show,Eq,Enum,Ord)
 
@@ -74,7 +79,53 @@ data Synset a = Synset
 instance Ord (Synset Validated) where
   Synset{wordSenses = (headWord:|_)} <= Synset{wordSenses = (headWord2:|_)}
     = headWord <= headWord2
-  
+
+---- validation
+data Validation e a = Failure e | Success a deriving (Show,Eq)
+
+instance Functor (Validation e) where
+  fmap _ (Failure e) = Failure e
+  fmap f (Success a) = Success (f a)
+
+instance Bifunctor Validation where
+  bimap f _ (Failure e) = Failure (f e)
+  bimap _ g (Success a) = Success (g a)
+
+instance Semigroup e => Applicative (Validation e) where
+  --  pure :: a -> Validation e a
+  pure = Success
+  --(<*>) :: Validation e (a -> b) -> Validation e a -> Validation e b
+  Success f <*> Success a  = Success (f a)
+  Success _ <*> Failure e  = Failure e
+  Failure e <*> Success _  = Failure e
+  Failure e <*> Failure e' = Failure (e <> e')
+
+data WNError
+  = ParseError String
+  | DuplicateWordSense String
+  | DuplicateSynsetWords (NonEmpty Text)
+  | DuplicateWordRelation (NonEmpty WordPointer)
+  | DuplicateSynsetRelation (NonEmpty SynsetRelation)
+  | MissingSynsetRelationTarget SynsetRelation
+  | MissingWordRelationTarget WordPointer
+  | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
+  | UnsortedWordSenses (NonEmpty (NonEmpty Text))
+  | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
+  | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
+  deriving (Show)
+
+data SourceError
+  = SourceError Text -- ^ name of source file
+                SourcePosition
+                WNError deriving (Show)
+
+toSourceError :: Synset a -> WNError -> SourceError
+toSourceError Synset{sourcePosition, lexicographerFileId}
+  = SourceError (lexicographerFileIdToText lexicographerFileId)
+                sourcePosition
+
+type WNValidation a = Validation (NonEmpty WNError) a
+type SourceValidation a = Validation (NonEmpty SourceError) a
 
 --- Pretty instances
 instance Pretty WNPOS where
@@ -118,6 +169,56 @@ instance Pretty WNWord where
 
 instance Pretty (Synset a) where
   pretty Synset{wordSenses = wordSense:|_} = pretty wordSense
+
+prettyMissingTarget :: Text -> Text -> Doc ann -> Doc ann
+prettyMissingTarget relationType relationName target
+  =   "error: Missing"
+  <+> pretty relationType
+  <+> pretty relationName
+  <+> "target" <+> target
+
+prettyUnordered :: Pretty a => Text -> NonEmpty (NonEmpty a) -> Doc ann
+prettyUnordered what sequences
+  = "warning: Unsorted" <+> pretty what <> line
+  <> (indent 2 . align . vsep . map prettyUnorderedSequence $ NE.toList sequences)
+  where
+    prettyUnorderedSequence (x:|xs) =
+      pretty x <+> "should come after" <+> hsep (map pretty xs)
+
+prettyDuplicate :: Pretty a => Text -> NonEmpty a -> Doc ann
+prettyDuplicate what duplicates
+  = "error: Duplicate"
+  <+> pretty what
+  <+> pretty (NE.head duplicates)
+
+instance Pretty WNError where
+  pretty (ParseError errorString) = pretty errorString
+  pretty (DuplicateWordSense sensekey)
+    = prettyDuplicate "wordsense" (singleton sensekey)
+  pretty (DuplicateSynsetWords synsetWords)
+    = prettyDuplicate "synset words" synsetWords
+  pretty (DuplicateWordRelation wordPointers)
+    = prettyDuplicate "word pointer" wordPointers
+  pretty (DuplicateSynsetRelation synsetRelations)
+    = prettyDuplicate "synset relation" synsetRelations
+  pretty (MissingSynsetRelationTarget (SynsetRelation relationName target))
+    = prettyMissingTarget "synset relation" relationName $ pretty target
+  pretty (MissingWordRelationTarget (WordPointer pointerName target))
+    = prettyMissingTarget "word pointer" pointerName $ pretty target
+  pretty (UnsortedSynsets sequences)
+    = prettyUnordered "synsets" sequences
+  pretty (UnsortedSynsetRelations sequences)
+    = prettyUnordered "synset relations" sequences
+  pretty (UnsortedWordSenses sequences)
+    = prettyUnordered "synset word senses" sequences
+  pretty (UnsortedWordPointers sequences)
+    = prettyUnordered "word pointers" sequences
+
+instance Pretty SourceError where
+  pretty (SourceError lexicographerFileId (SourcePosition (beg, end)) wnError)
+    =   pretty lexicographerFileId
+    <>  colon <> pretty beg <> colon <> pretty end <> colon
+    <+> nest 2 (pretty wnError) <> line
 
 ---
 -- to RDF instances
@@ -231,4 +332,3 @@ synsetToTriples relationsMap Synset{lexicographerFileId, wordSenses, definition,
         , map (Triple wordSenseIri framePredicate) frameLiterals
         , zipWith (Triple wordSenseIri) pointersPredicates targetWordSenseObjs
         ]
-
