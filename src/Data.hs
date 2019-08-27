@@ -18,7 +18,7 @@ import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
                        IRI(..), Triple(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest
+import Data.Text.Prettyprint.Doc ( Pretty(..), Doc, dot, colon, (<+>), nest
                                  , line, indent, align, vsep, hsep)
 
 

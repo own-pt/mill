@@ -2,6 +2,7 @@ module Validate
   ( validateSynsets
   , makeIndex
   , Index
+  , senseKey
   ) where
 
 import Data
