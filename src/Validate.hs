@@ -1,6 +1,7 @@
 module Validate
   ( validateSynsets
   , makeIndex
+  , Index
   ) where
 
 import Data
@@ -9,41 +10,34 @@ import Data.Bifunctor (bimap)
 import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromJust, mapMaybe)
 import qualified Data.Text as T
-import Data.GenericTrie (Trie, fromListWith', member, lookup, foldWithKey, empty, insert)
+import Data.GenericTrie (Trie, fromListWith', member, foldWithKey, empty, insert)
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
-type Index a = Trie String (Either String a) -- Left is a reference to another key
+type Index a = Trie String a
 
-makeIndex :: NonEmpty (Synset Unvalidated) -> Trie String (NonEmpty (Either String (Synset Unvalidated)))
+makeIndex :: NonEmpty (Synset Unvalidated) -> Index (NonEmpty (Synset Unvalidated))
 makeIndex synsets = fromListWith' (<>) keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
     synsetPairs synset@Synset{wordSenses = (headWordSense:|wordSenses)} =
       let headSenseKey = wordSenseKey headWordSense
+          value        = singleton synset
       in
-        (headSenseKey, singleton $ Right synset) : map (\wordSense -> (wordSenseKey wordSense, singleton $ Left headSenseKey)) wordSenses
+        (headSenseKey, value) : map (\wordSense -> (wordSenseKey wordSense, value)) wordSenses
 
-checkIndexNoDuplicates :: Trie String (NonEmpty (Either String (Synset Unvalidated))) -> SourceValidation (Index (Synset Unvalidated))
-checkIndexNoDuplicates index = foldWithKey go (Success empty) index
+checkIndexNoDuplicates :: Index (NonEmpty (Synset Unvalidated)) -> SourceValidation (Index (Synset Unvalidated))
+checkIndexNoDuplicates = foldWithKey go (Success empty)
   where
     go key (value :| []) noDuplicatesTrie
       = Success (insert key value) <*> noDuplicatesTrie
     go key values noDuplicatesTrie
       = case map (\synset -> toSourceError synset . DuplicateWordSense $ takeWhile (/= '\t') key)
-             $ duplicatesSynsets values of
+             $ NE.toList values of
           [] -> noDuplicatesTrie
           x:duplicateErrors -> Failure (x :| duplicateErrors) <*> noDuplicatesTrie
-    duplicatesSynsets = mapMaybe synsetInfo . NE.toList
-    synsetInfo (Right synset)
-      = Just synset
-    synsetInfo (Left reference)
-      = case fromJust $ lookup reference index of
-          (Right synset :| []) -> Just synset
-          _ -> Nothing
 
 wordSenseKey :: WNWord -> String
 wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _)
@@ -164,7 +158,7 @@ checkWordSensePointersTargets index = traverse checkWordPointer
       where
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
-validateSynsets :: Trie String (NonEmpty (Either String (Synset Unvalidated)))
+validateSynsets :: Index (NonEmpty (Synset Unvalidated))
   -> NonEmpty (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
 validateSynsets indexWithDuplicates (firstSynset:|synsets) =
