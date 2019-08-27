@@ -140,7 +140,6 @@ def print_synset(graph, synset, sorted_word_senses, lexicographerFile, synset_re
         rels = []
         for predicate, obj in graph.predicate_objects(synset):
             _, predicate_name = r.namespace.split_uri(predicate)
-            # print(predicate_name)
             predicate_txt_name = synset_relations.get(predicate_name, None)
             if predicate_name in ["frame", "containsWordSense", "gloss",
                                   "example", "lexicographerFile", "lexicalForm"]:
@@ -154,12 +153,27 @@ def print_synset(graph, synset, sorted_word_senses, lexicographerFile, synset_re
         for (relation_name, target) in rels:
             write(print_relation(relation_name, target))
 
+    def print_synset_gloss_splited_in_defintion_and_examples(gloss):
+        def remove_quotes(example):
+            if example[-1] == "\"" and "\"" not in example[:-1]:
+                return example.strip("\"")
+            else:
+                return "\"" + example
+
+        def_examples = gloss.split("; \"")
+        definition = def_examples[0].strip()
+        examples = def_examples[1:]
+        write("{}: {}".format(synset_relations["definition"], definition))
+        for example in examples:
+            write("{}: {}".format(
+                synset_relations["example"], remove_quotes(example.strip())))
+
     for word_sense in sorted_word_senses:
         print_word_sense(graph, word_sense, lexicographerFile,
                          word_relations, synset_relations, frames_to_id, write)
     # definition
-    write("{}: {}".format(
-        synset_relations["definition"], graph.value(synset, wn30["gloss"])))
+    print_synset_gloss_splited_in_defintion_and_examples(
+        graph.value(synset, wn30["gloss"]))
     # examples
     for example in graph.objects(synset, wn30["example"]):
         write("{}: {}".format(synset_relations["example"], example))
