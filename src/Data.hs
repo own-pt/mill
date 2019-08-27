@@ -119,10 +119,9 @@ data SourceError
                 SourcePosition
                 WNError deriving (Show)
 
-toSourceError :: Synset a -> WNError -> SourceError
-toSourceError Synset{sourcePosition, lexicographerFileId}
-  = SourceError (lexicographerFileIdToText lexicographerFileId)
-                sourcePosition
+attachOffset :: Synset a -> WNError -> (Int, WNError)
+attachOffset Synset{sourcePosition = SourcePosition (offset,_)}
+  = (,) offset
 
 type WNValidation a = Validation (NonEmpty WNError) a
 type SourceValidation a = Validation (NonEmpty SourceError) a

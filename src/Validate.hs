@@ -12,7 +12,10 @@ import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromJust, mapMaybe)
 import qualified Data.Text as T
 import Data.GenericTrie (Trie, fromListWith', member, lookup, foldWithKey, empty, insert)
+import Data.Semigroup (sconcat)
+import Data.Text (Text)
 import Prelude hiding (lookup)
+import Text.Megaparsec (PosState, SourcePos(..),unPos,attachSourcePos)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
@@ -27,13 +30,14 @@ makeIndex synsets = fromListWith' (<>) keyValuePairs
       in
         (headSenseKey, singleton $ Right synset) : map (\wordSense -> (wordSenseKey wordSense, singleton $ Left headSenseKey)) wordSenses
 
-checkIndexNoDuplicates :: Trie String (NonEmpty (Either String (Synset Unvalidated))) -> SourceValidation (Index (Synset Unvalidated))
+checkIndexNoDuplicates :: Trie String (NonEmpty (Either String (Synset Unvalidated)))
+  -> Validation (NonEmpty (Int, WNError)) (Index (Synset Unvalidated))
 checkIndexNoDuplicates index = foldWithKey go (Success empty) index
   where
     go key (value :| []) noDuplicatesTrie
       = Success (insert key value) <*> noDuplicatesTrie
     go key values noDuplicatesTrie
-      = case map (\synset -> toSourceError synset . DuplicateWordSense $ takeWhile (/= '\t') key)
+      = case map (\synset -> attachOffset synset . DuplicateWordSense $ takeWhile (/= '\t') key)
              $ duplicatesSynsets values of
           [] -> noDuplicatesTrie
           x:duplicateErrors -> Failure (x :| duplicateErrors) <*> noDuplicatesTrie
@@ -58,14 +62,13 @@ senseKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (Lexical
 
 ---
 -- checks
-checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
-checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition
+checkSynset :: Index a -> Synset Unvalidated -> Validation (NonEmpty (Int, WNError)) (Synset Validated)
+checkSynset index unvalidatedSynset@Synset{lexicographerFileId, wordSenses, relations, definition
                         , examples, frames, sourcePosition} =
   case result of
     Success synset -> Success synset
-    Failure errors -> Failure $ NE.map (SourceError lexfileName sourcePosition) errors
+    Failure errors -> Failure $ NE.map (attachOffset unvalidatedSynset) errors
   where
-    lexfileName = lexicographerFileIdToText lexicographerFileId
     result = Synset
       <$> Success sourcePosition
       <*> Success lexicographerFileId
@@ -164,17 +167,25 @@ checkWordSensePointersTargets index = traverse checkWordPointer
       where
         targetSenseKey = senseKey lexFileId wordForm lexicalId
 
-validateSynsets :: Trie String (NonEmpty (Either String (Synset Unvalidated)))
-  -> NonEmpty (Synset Unvalidated)
+validateLexFileSynsets :: Trie String (NonEmpty (Either String (Synset Unvalidated)))
+  -> (NonEmpty (Synset Unvalidated), PosState Text)
   -> SourceValidation (NonEmpty (Synset Validated))
-validateSynsets indexWithDuplicates (firstSynset:|synsets) =
-  checkSynsetsOrder . checkSynsets $ checkIndexNoDuplicates indexWithDuplicates
+validateLexFileSynsets indexWithDuplicates (firstSynset:|synsets, posState) =
+  bimap liftErrors id . checkSynsetsOrder . checkSynsets $ checkIndexNoDuplicates indexWithDuplicates
   where
+    liftErrors parseErrors
+      = let (errors, _) = attachSourcePos fst parseErrors posState
+        in NE.map toSourceError errors
+    toSourceError ((_, wnError), SourcePos{sourceName, sourceLine, sourceColumn})
+      = SourceError (T.pack sourceName)
+          (SourcePosition (unPos sourceLine, unPos sourceColumn))
+          wnError
     checkSynsetsOrder (Success validatedSynsets)
-      = bimap (NE.map toError) NE.fromList . validateSorted $ NE.toList validatedSynsets
+      = bimap (NE.map toError)
+      NE.fromList . validateSorted $ NE.toList validatedSynsets
     checkSynsetsOrder (Failure es) = Failure es
     toError unsortedSynsetSequences@(synset:|_)
-      = toSourceError synset $ UnsortedSynsets (unsortedSynsetSequences :| [])
+      = attachOffset synset $ UnsortedSynsets (unsortedSynsetSequences :| [])
     checkSynsets (Failure errors) = Failure errors
     checkSynsets (Success index)
       = (:|)
@@ -184,5 +195,9 @@ validateSynsets indexWithDuplicates (firstSynset:|synsets) =
         checkSynset' = checkSynset index
         go synset result = (:) <$> checkSynset' synset <*> result
 
----
-
+validateSynsets :: Trie String (NonEmpty (Either String (Synset Unvalidated)))
+  -> NonEmpty (NonEmpty (Synset Unvalidated), PosState Text)
+  -> SourceValidation (NonEmpty (Synset Validated))
+validateSynsets indexWithDuplicates lexFileSynsetsPosStates =
+  bimap id sconcat . sequenceA
+  $ NE.map (validateLexFileSynsets indexWithDuplicates) lexFileSynsetsPosStates

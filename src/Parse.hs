@@ -31,22 +31,32 @@ type Parser = ParsecT Void Text (Reader (LexicographerFileId, Map Text Text))
 
 parseLexicographer :: Map Text Text
   -> String -> Text
-  -> SourceValidation (NonEmpty (Synset Unvalidated))
+  -> SourceValidation (NonEmpty (Synset Unvalidated), PosState Text)
 parseLexicographer relationsMap fileName inputText =
   case runReader (runParserT lexicographerFile fileName inputText)
                  (lexFileId, relationsMap) of
     Right rawSynsets
-      -> case partitionEithers (NE.toList rawSynsets) of
-           ([], synsetsToValidate) -> Success $ NE.fromList synsetsToValidate
-           (parseErrors, _) -> Failure . NE.map toSourceError $ NE.fromList parseErrors
+      -> case partitionEithers $ NE.toList rawSynsets of
+           ([], synsetsToValidate) -> Success (NE.fromList synsetsToValidate, posState)
+           (x:parseErrors, _) -> Failure . liftErrors $ x:|parseErrors
     Left ParseErrorBundle{bundleErrors} ->
-      Failure . NE.map toSourceError $ bundleErrors
+      Failure . liftErrors $ bundleErrors
   where
-    toSourceError parseError
-      = let errorPos = errorOffset parseError
-        in SourceError (T.pack fileName)
-                       (SourcePosition (errorPos, errorPos +1))
-                       (ParseError $ parseErrorTextPretty parseError)
+    posState =
+      PosState
+      { pstateInput = inputText
+      , pstateOffset = 0
+      , pstateSourcePos = initialPos fileName
+      , pstateTabWidth = defaultTabWidth
+      , pstateLinePrefix = ""
+      }
+    liftErrors parseErrors
+      = let (errors, _) = attachSourcePos errorOffset parseErrors posState
+        in NE.map toSourceError errors
+    toSourceError (parseError, SourcePos{sourceName, sourceLine, sourceColumn})
+      = SourceError (T.pack sourceName)
+          (SourcePosition (unPos sourceLine, unPos sourceColumn))
+          (ParseError $ parseErrorTextPretty parseError)
     lexFileId :: LexicographerFileId
     lexFileId  =
       fromMaybe (error $ "Couldn't parse first line of "

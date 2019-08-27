@@ -9,10 +9,11 @@ module Lib
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
-            , synsetToTriples )
+            , synsetToTriples, Validation(..), SourceValidation
+            , singleton )
 import Parse (parseLexicographer)
-import Validate ( Validation(..), makeIndex
-                , validateSynsets, SourceValidation)
+import Validate ( makeIndex
+                , validateSynsets )
 ----------------------------------
 import Control.Monad (unless,(>>))
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
@@ -24,9 +25,9 @@ import Data.Functor(void)
 import Data.List (partition)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import Data.Maybe (maybe)
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
 import Data.RDF.ToRDF (runRDFGen)
 import Data.RDF.Types (RDFGraph(..), IRI(..))
@@ -35,11 +36,12 @@ import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Data.Text.Prettyprint.Doc (Pretty(..))
+import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 import qualified Data.Text.Read as TR
 import System.Directory (doesDirectoryExist)
 import System.FilePath ((</>), normalise,equalFilePath)
-import Data.Text.Prettyprint.Doc (Pretty(..))
-import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
+import Text.Megaparsec (PosState)
 
 data Config = Config
   { lexnamesToId     :: Map Text Int
@@ -85,7 +87,8 @@ readConfig configurationDir = do
 
 type App = ReaderT Config IO
 
-parseLexicographerFile :: FilePath -> App (SourceValidation (NonEmpty (Synset Unvalidated)))
+parseLexicographerFile :: FilePath
+  -> App (SourceValidation (NonEmpty (Synset Unvalidated), PosState Text))
 parseLexicographerFile filePath = do
   Config{relationRDFNames} <- ask
   liftIO $ do
@@ -96,24 +99,26 @@ parseLexicographerFile filePath = do
 parseLexicographerFiles ::  NonEmpty FilePath
   -> App (SourceValidation (NonEmpty (Synset Validated)))
 parseLexicographerFiles filePaths = do
-  lexFilesSynsetsOrErrors <- mapM parseLexicographerFile filePaths
-  case sequenceA lexFilesSynsetsOrErrors of
-    Success lexFilesSynsets ->
-      let synsets = sconcat lexFilesSynsets
+  parseResults <- mapM parseLexicographerFile filePaths
+  case sequenceA parseResults of
+    Success results ->
+      let (lexFilesSynsets, posStates) = NE.unzip results
+          synsets = sconcat lexFilesSynsets
           index   = makeIndex synsets
-      in return $ validateSynsets index synsets
+      in return . validateSynsets index $ NE.zip lexFilesSynsets posStates
     Failure sourceErrors -> return $ Failure sourceErrors
 
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)
 
-validateSynsetsNoParseErrors :: NonEmpty (NonEmpty (Synset Unvalidated))
-  -> Maybe (NonEmpty (Synset Unvalidated))
+validateSynsetsNoParseErrors :: NonEmpty (NonEmpty (Synset Unvalidated), PosState Text)
+  -> Maybe (NonEmpty (Synset Unvalidated), PosState Text)
   -> IO ()
-validateSynsetsNoParseErrors indexSynsets maybeSynsetsToValidate =
-  let synsets = sconcat indexSynsets
+validateSynsetsNoParseErrors results maybeSynsetsToValidate =
+  let lexFilesSynsets = NE.map fst results
+      synsets = sconcat lexFilesSynsets
       index   = makeIndex synsets
-  in case validateSynsets index (fromMaybe synsets maybeSynsetsToValidate) of
+  in case validateSynsets index (maybe results singleton maybeSynsetsToValidate) of
     Success _ -> return ()
     Failure errors -> prettyPrintList errors
     
@@ -151,7 +156,9 @@ synsetsToTriples relationsMap baseIRI synsets outputFile =
   . toLazyByteString
   . encodeRDFGraph . RDFGraph Nothing $ DL.toList synsetsTriples
   where
-    synsetsTriples = foldMap (\synset -> runRDFGen (synsetToTriples relationsMap synset) baseIRI) synsets
+    synsetsTriples = foldMap (\synset
+                              -> runRDFGen (synsetToTriples relationsMap synset) baseIRI)
+                     synsets
 
 lexicographerFilesToTriples :: IRI -> FilePath -> App ()
 lexicographerFilesToTriples baseIRI outputFile = do
