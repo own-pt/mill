@@ -49,15 +49,16 @@ def read_config(config_dir):
 
     def read_relations(res, fields):
         (synset_relations, word_relations) = res
-        relation_rdf = fields[2].split('/')[-1]
-        relation_text = fields[1]
-        if fields[4] == "word":
-            word_relations[relation_rdf] = relation_text
-        elif fields[4] == "synset":
-            synset_relations[relation_rdf] = relation_text
-        else:
-            word_relations[relation_rdf] = relation_text
-            synset_relations[relation_rdf] = relation_text
+        relation_name = fields[0]
+        relation_text = fields[2]
+        if relation_text != "_":
+            if fields[5] == "word":
+                word_relations[relation_name] = relation_text
+            elif fields[5] == "synset":
+                synset_relations[relation_name] = relation_text
+            else:
+                word_relations[relation_name] = relation_text
+                synset_relations[relation_name] = relation_text
         return (synset_relations, word_relations)
 
     def read_frames(res, fields):
@@ -158,7 +159,7 @@ def print_synset(graph, synset, sorted_word_senses, lexicographerFile, synset_re
                          word_relations, synset_relations, frames_to_id, write)
     # definition
     write("{}: {}".format(
-        synset_relations.get("gloss", "d"), graph.value(synset, wn30["gloss"])))
+        synset_relations["definition"], graph.value(synset, wn30["gloss"])))
     # examples
     for example in graph.objects(synset, wn30["example"]):
         write("{}: {}".format(synset_relations["example"], example))
