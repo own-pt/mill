@@ -1,6 +1,6 @@
 name	lexicographer file	text file	rdf	pos	domain	description
 antonymOf	!	ant	wn30/own-pt/schema/antonymOf	nvar	word	Antonym
-memberHolonymOf	#m	m	wn30/own-pt/schema/memberHolonymOf	n	synset	Member holonym
+memberHolonymOf	#m	hm	wn30/own-pt/schema/memberHolonymOf	n	synset	Member holonym
 partHolonymOf	#p	hp	wn30/own-pt/schema/partHolonymOf	n	synset	Part holonym
 substanceHolonymOf	#s	hs	wn30/own-pt/schema/substanceHolonymOf	n	synset	Substance holonym
 sameVerbGroupAs	$	vg	wn30/own-pt/schema/sameVerbGroupAs	v	synset,word	Verb Group
