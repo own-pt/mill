@@ -70,7 +70,8 @@
 				 "."
 				 (one-or-more (not (any ?:)))
 				 ":"))
-	 (let lex-form (one-or-more (not (any ? ))))
+	 (let lex-form       (one-or-more (not (any ? ))))
+	 (optional (1+ space))
 	 (let maybe-lex-id   (optional (one-or-more (char digit)))))
      (let ((lex-file (if (string-empty-p maybe-lex-name)
 			 (buffer-file-name)
@@ -80,6 +81,7 @@
        (mill--collect-xref-matches lex-file
 				   lex-form
 				   lex-id)))))
+
 
 (defun mill--collect-xref-matches (file lexical-form &optional lexical-id)
   (with-temp-buffer
