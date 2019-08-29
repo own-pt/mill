@@ -64,7 +64,7 @@ newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord,Pretty,ToObject
 
 instance ToJSON WordSenseForm where
     toEncoding = genericToEncoding defaultOptions
-    
+
 newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord,Pretty)
 
 newtype WordSenseIdentifier =
@@ -271,4 +271,3 @@ instance Pretty SourceError where
     =   pretty lexicographerFileId
     <>  colon <> pretty beg <> colon <> pretty end <> colon
     <+> nest 2 (pretty wnError) <> line
-
