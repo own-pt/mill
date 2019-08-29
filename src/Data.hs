@@ -1,43 +1,77 @@
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
 
 module Data where
 
-import Control.Monad.Trans.Reader (ask)
+import Data.Aeson (ToJSON(..), genericToEncoding, defaultOptions)
 import Data.Bifunctor (Bifunctor(..))
-import qualified Data.DList as DL
-import qualified Data.List.NonEmpty as NE
+import Data.List (find)
 import Data.List.NonEmpty(NonEmpty(..))
-import Data.Map (Map)
-import qualified Data.Map.Strict as M
+import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
-import Data.Monoid (Endo(..))
-import Data.RDF.ToRDF (ToObject(..), RDFGen, appBaseIRI,Triples)
-import Data.RDF.Types (Subject(..), Predicate(..), Object(..),
-                       IRI(..), Triple(..),Literal(..),LiteralType(..))
+import Data.RDF.ToRDF (ToObject(..))
+import Data.RDF.Types (Object(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest
                                  , line, indent, align, vsep, hsep)
-
+import GHC.Generics (Generic)
+import Text.Printf (printf)
 
 singleton :: a -> NonEmpty a
 singleton x = x :| []
 
-data WNPOS = A | S | R | N | V deriving (Show,Eq,Enum,Ord)
+data WNPOS = A | S | R | N | V deriving (Eq,Enum,Ord,Show)
 
-newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Show,Eq,Ord)
+newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Eq,Ord,Show)
 
-newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord,Pretty,ToObject)
+synsetType :: WNPOS -> Int
+synsetType N = 1
+synsetType V = 2
+synsetType A = 3
+synsetType R = 4
+synsetType S = 5
 
-newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord,Pretty,ToObject)
+lexicographerFileIdToText :: LexicographerFileId -> Text
+lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) =
+  T.concat [posText wnPOS, ".", filename]
+  where
+    posText N = "noun"
+    posText V = "verb"
+    posText A = "adj"
+    posText S = "adjs"
+    posText R = "adv"
+
+lexicographerFileIdFromText :: Text -> Maybe LexicographerFileId
+lexicographerFileIdFromText = go . T.breakOn "."
+  where
+    wrap pos name = Just $ LexicographerFileId (pos, T.tail name)
+    go ("noun",name) = wrap N name
+    go ("verb",name) = wrap V name
+    go ("adj",name)  = wrap A name
+    go ("adjs",name) = wrap S name
+    go ("adv",name)  = wrap R name
+    go _             = Nothing
+
+instance ToObject LexicographerFileId where
+  object lexicographerFileId
+    = pure . LiteralObject
+    $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
+
+newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord,Pretty,ToObject,Generic)
+
+instance ToJSON WordSenseForm where
+    toEncoding = genericToEncoding defaultOptions
+
+newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord,Pretty)
 
 newtype WordSenseIdentifier =
   WordSenseIdentifier ( LexicographerFileId
                       , WordSenseForm
                       , LexicalId
-                      ) deriving (Show,Eq,Ord)
+                      ) deriving (Eq,Ord,Show)
 
 makeWordSenseIdentifier :: LexicographerFileId -> WordSenseForm -> LexicalId
   -> WordSenseIdentifier
@@ -58,7 +92,25 @@ data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
   deriving (Show,Eq,Ord)
 type FrameIdentifier = Int
 data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
-  deriving (Show,Eq,Ord)
+  deriving (Eq,Ord,Show)
+
+senseKey :: Int -> Int -> WNWord -> String
+senseKey lexFileNum synsetTypeNum wordSense@(WNWord (WordSenseIdentifier (_,WordSenseForm wordForm,LexicalId lexicalId)) _ wordPointers)
+  = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum
+                                lexicalId headWordForm (headWordLexicalId :: String)
+  where
+    lemma = T.toLower wordForm
+    findHead 5 = Just . fromMaybe (error $ "No head synset found for " ++ show wordSense) $ find isHeadPointer wordPointers
+    findHead n | n `elem` [1,2,3,4] = Nothing
+    findHead n = error $ "No possible synset type of " ++ show n
+    isHeadPointer (WordPointer "sim" _) = True
+    isHeadPointer _ = False
+    (headWordForm, headWordLexicalId) =
+      case findHead synsetTypeNum of
+        Nothing -> ("", "")
+        Just (WordPointer _ (WordSenseIdentifier (_, WordSenseForm headForm, LexicalId headLexicalId)))
+          -> (T.toLower headForm, printf "%02d" headLexicalId)
+
 
 newtype SourcePosition = SourcePosition (Int, Int) deriving (Show,Eq,Ord)
 
@@ -219,124 +271,3 @@ instance Pretty SourceError where
     =   pretty lexicographerFileId
     <>  colon <> pretty beg <> colon <> pretty end <> colon
     <+> nest 2 (pretty wnError) <> line
-
----
--- to RDF instances
-
-lexicographerFileIdToText :: LexicographerFileId -> Text
-lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) =
-  T.concat [posText wnPOS, ".", filename]
-  where
-    posText N = "noun"
-    posText V = "verb"
-    posText A = "adj"
-    posText S = "adjs"
-    posText R = "adv"
-
-lexicographerFileIdFromText :: Text -> Maybe LexicographerFileId
-lexicographerFileIdFromText = go . T.breakOn "."
-  where
-    wrap pos name = Just $ LexicographerFileId (pos, T.tail name)
-    go ("noun",name) = wrap N name
-    go ("verb",name) = wrap V name
-    go ("adj",name)  = wrap A name
-    go ("adjs",name) = wrap S name
-    go ("adv",name)  = wrap R name
-    go _             = Nothing
-
-instance ToObject LexicographerFileId where
-  object lexicographerFileId
-    = pure . LiteralObject
-    $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
-
-wnIdentifierToIRI :: Text -> (LexicographerFileId, WordSenseForm, LexicalId) -> RDFGen IRI
-wnIdentifierToIRI prefix (lexicographerFileId, WordSenseForm wForm, LexicalId lId) =
-  go <$> ask
-  where
-    go baseIri@IRI{iriPath}
-      = baseIri { iriPath = T.concat [ iriPath
-                                     , prefix, "-"
-                                     , lexicographerFileIdToText lexicographerFileId
-                                     , "-", wForm, "-", T.pack $ show lId
-                                     ]
-                }
-
-wordSenseIdIRI :: WordSenseIdentifier -> RDFGen IRI
-wordSenseIdIRI (WordSenseIdentifier wnIdentifier) =
-  wnIdentifierToIRI "wordsense" wnIdentifier
-
-synsetIdentifierToIRI :: SynsetIdentifier -> RDFGen IRI
-synsetIdentifierToIRI (SynsetIdentifier wnIdentifier) = wnIdentifierToIRI "synset" wnIdentifier
-
-synsetToTriples :: Map Text Text -> Map Text Text -> Synset Validated -> RDFGen Triples
-synsetToTriples textToCanonicMap canonicToRDFMap
-  Synset{lexicographerFileId, wordSenses, definition, examples
-                                   , frames = synsetFrames, relations} = do
-  lexicographerFileLiteral   <- object lexicographerFileId
-  synsetIri                  <- IRISubject <$> synsetIriGen
-  lexicographerFilePredicate <- makePredicate "lexicographerFile"
-  definitionPredicate        <- makePredicate "definition"
-  definitionLiteral          <- object definition
-  examplePredicate           <- makePredicate "example"
-  exampleLiterals            <- mapM object examples
-  containsWordSensePredicate <- makePredicate "containsWordSense"
-  wordSenseObjs              <- map IRIObject <$>
-                                  mapM wordSenseIRI wordSenses'
-  framePredicate             <- makePredicate "frame"
-  frameLiterals              <- mapM object synsetFrames
-  wordSenseTriples           <- concat <$> mapM wordSenseToTriples wordSenses'
-  relationPredicates         <- mapM (makePredicate
-                                      . (\(SynsetRelation relationName _) -> relationName))
-                                     relations
-  targetSynsetObjs           <- map IRIObject
-                                  <$> mapM (synsetIdentifierToIRI
-                                            . (\(SynsetRelation _ targetSynsetId) -> targetSynsetId))
-                                           relations
-  return . DL.concat $ map DL.fromList [
-    [ Triple synsetIri lexicographerFilePredicate lexicographerFileLiteral
-    , Triple synsetIri definitionPredicate definitionLiteral ]
-    , map (Triple synsetIri examplePredicate) exampleLiterals
-    , map (Triple synsetIri containsWordSensePredicate) wordSenseObjs
-    , map (Triple synsetIri framePredicate) frameLiterals
-    , wordSenseTriples
-    , zipWith (Triple synsetIri) relationPredicates targetSynsetObjs
-    ]
-  where
-    wordSenseIRI (WNWord wordSenseId _ _) = wordSenseIdIRI wordSenseId
-    wordSenses' = NE.toList wordSenses
-    makePredicate relationName
-      = fmap Predicate . appBaseIRI
-      $ Endo (\baseIri -> baseIri {iriPath = toRDFName relationName})
-    lookupRelation relationName textToCanonicMap' canonicToRDFMap'
-      =  case M.lookup relationName textToCanonicMap' of
-           Nothing -> fromMaybe (error $ "Inexisting relation "
-                                          ++ T.unpack relationName ++ " on relations.tsv")
-                         $ M.lookup relationName canonicToRDFMap'
-           Just canonicName -> fromMaybe (error $ "Inexisting relation "
-                                          ++ T.unpack relationName ++ " on relations.tsv")
-                         $ M.lookup canonicName canonicToRDFMap'
-    toRDFName textName =
-      lookupRelation textName textToCanonicMap canonicToRDFMap
-    synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
-    headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier)
-      $ NE.head wordSenses
-    wordSenseToTriples :: WNWord -> RDFGen [Triple]
-    wordSenseToTriples wordSense@(WNWord (WordSenseIdentifier (_, wordForm, _)) frames pointers) = do
-      wordSenseIri         <- IRISubject <$> wordSenseIRI wordSense
-      lexicalFormPredicate <- makePredicate "lexicalForm"
-      lexicalForm          <- object wordForm
-      framePredicate       <- makePredicate "frame"
-      frameLiterals        <- mapM object frames
-      pointersPredicates   <- mapM (makePredicate . (\(WordPointer pointerName _) -> pointerName))
-                                   pointers
-      targetWordSenseObjs  <- map IRIObject
-                                <$> mapM (wordSenseIdIRI
-                                          . (\(WordPointer _ targetWordSenseId) -> targetWordSenseId))
-                                   pointers
-      return $ concat [
-        [
-          Triple wordSenseIri lexicalFormPredicate lexicalForm
-        ]
-        , map (Triple wordSenseIri framePredicate) frameLiterals
-        , zipWith (Triple wordSenseIri) pointersPredicates targetWordSenseObjs
-        ]
