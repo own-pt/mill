@@ -36,61 +36,79 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Read as TR
-import System.Directory (doesDirectoryExist)
+import System.Directory (canonicalizePath, doesDirectoryExist)
 import System.FilePath ((</>), normalise,equalFilePath)
 import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 
+-- | This datastructure contains the information found in the
+-- configuration files (currently only lexnames.tsv and relations.tsv
+-- are considered.)
 data Config = Config
-  { lexnamesToId     :: Map Text Int
-  , relationRDFNames :: Map Text Text
-  , lexFilePaths     :: NonEmpty FilePath
+  { -- | maps lexicographer filenames to their numerical ids
+    lexnamesToId       :: Map Text Int
+  -- | maps relation names in text files to their canonical names
+  , textToCanonicNames :: Map Text Text
+  -- | maps canonical relation names to their RDF names
+  , canonicToRDFNames  :: Map Text Text
+  -- | contains the filepaths to the files in the WordNet
+  , lexFilePaths       :: NonEmpty FilePath
   } deriving (Show,Eq)
 
-readTSV :: Ord a => FilePath -> ([Text] -> Either String (a, b)) -> IO (Map a b)
+readTSV :: Ord a => FilePath -> ([Text] -> Either String [(a, b)]) -> IO (Map a b)
 readTSV filepath readLine = do
   text <- TIO.readFile filepath
   case go text of
-    ([], pairs) -> return $ M.fromList pairs
+    ([], pairs) -> return . M.fromList $ concat pairs
     (errors, _) -> mapM_ putStrLn errors >> return M.empty
   where
     go = partitionEithers . map readLine
       . filter (not . isComment)
-      . map (T.splitOn "\t") . drop 1 . T.lines
-    isComment [field] = let field' = T.strip field in T.take 2 field' == "--"
+      . map (map T.strip . T.splitOn "\t") . drop 1 . T.lines
+    isComment [field] = T.take 2 field == "--"
     isComment _ = False
 
 readConfig :: FilePath -> IO Config
-readConfig configurationDir = do
-  isDirectory       <- doesDirectoryExist configurationDir
+readConfig configurationDir' = do
+  configurationDir   <- canonicalizePath configurationDir'
+  isDirectory        <- doesDirectoryExist configurationDir
   unless isDirectory (error "Filepath must be a directory")
-  lexnamesToId'     <- readTSV (configurationDir </> "lexnames.tsv") lexnamesReader
-  relationRDFNames' <- readTSV (configurationDir </> "relations.tsv") relationsReader
-  return $ Config lexnamesToId' relationRDFNames' (lexFilePaths' lexnamesToId')
+  go configurationDir
   where
-    lexFilePaths' lexNamesMap =
-      let lexnames = map normalize (M.keys lexNamesMap)
-      in if null lexnames
-         then error "No files specified in lexnames.tsv"
-         else NE.fromList lexnames
-    normalize lexFileId = normalise $ configurationDir </> T.unpack lexFileId
-    lexnamesReader [lexnameIdStr, lexicographerFile, _] =
-      case TR.decimal lexnameIdStr of
-        Left err -> Left err
-        Right (lexnameId, "") -> Right (lexicographerFile, lexnameId)
-        Right (_, trailing) -> Left $ "Trailing garbage after " ++ T.unpack trailing
-    lexnamesReader _ = Left "Wrong number of fields in lexnames.tsv"
-    relationsReader [_,relationName,rdfName,_,_,_] = Right (relationName, rdfName)
-    relationsReader _ = Left "Wrong number of fields in relations.tsv"
+    go configurationDir = do
+      lexnamesToId       <- readTSV (configurationDir </> "lexnames.tsv") lexnamesReader
+      -- FIXME: reading file twice, but oh well..
+      textToCanonicNames <- readTSV (configurationDir </> "relations.tsv") textToCanonicNamesReader
+      canonicToRDFNames  <- readTSV (configurationDir </> "relations.tsv") canonicToRDFNamesReader
+      let lexFilePaths = lexFilePaths' lexnamesToId
+      return $ Config {lexnamesToId, textToCanonicNames, canonicToRDFNames, lexFilePaths}
+        where
+          lexFilePaths' lexNamesMap =
+            let lexnames = map normalize (M.keys lexNamesMap)
+            in if null lexnames
+            then error "No files specified in lexnames.tsv"
+            else NE.fromList lexnames
+          normalize lexFileId = configurationDir </> T.unpack lexFileId
+          lexnamesReader [lexnameIdStr, lexicographerFile, _] =
+            case TR.decimal lexnameIdStr of
+              Left err -> Left err
+              Right (lexnameId, "") -> Right [(lexicographerFile, lexnameId)]
+              Right (_, trailing) -> Left $ "Trailing garbage after " ++ T.unpack trailing
+          lexnamesReader _ = Left "Wrong number of fields in lexnames.tsv"
+          textToCanonicNamesReader [_,_,"_",_,_,_,_]      = Right []
+          textToCanonicNamesReader [canonicName,_,textName,_,_,_,_] = Right [(textName, canonicName)]
+          textToCanonicNamesReader _ = Left "Wrong number of fields in relations.tsv"
+          canonicToRDFNamesReader  [canonicName,_,_,rdfName,_,_,_] = Right [(canonicName, rdfName)]
+          canonicToRDFNamesReader _ = Left "Wrong number of fields in relations.tsv"
 
 type App = ReaderT Config IO
 
 parseLexicographerFile :: FilePath -> App (SourceValidation (NonEmpty (Synset Unvalidated)))
 parseLexicographerFile filePath = do
-  Config{relationRDFNames} <- ask
+  Config{textToCanonicNames} <- ask
   liftIO $ do
     content <- TIO.readFile $ normalise filePath
-    let result = parseLexicographer relationRDFNames filePath content
+    let result = parseLexicographer textToCanonicNames filePath content
     return result
 
 parseLexicographerFiles ::  NonEmpty FilePath
@@ -144,21 +162,25 @@ validateLexicographerFiles = do
     Success lexFilesSynsets
       -> validateSynsetsNoParseErrors lexFilesSynsets Nothing
 
-synsetsToTriples :: Map Text Text
+synsetsToTriples :: Map Text Text -> Map Text Text
   -> IRI -> NonEmpty (Synset Validated) -> FilePath -> IO ()
-synsetsToTriples relationsMap baseIRI synsets outputFile =
+synsetsToTriples textToCanonicMap canonicToRDFMap baseIRI synsets outputFile =
   encodeFile outputFile
   . toLazyByteString
   . encodeRDFGraph . RDFGraph Nothing $ DL.toList synsetsTriples
   where
-    synsetsTriples = foldMap (\synset -> runRDFGen (synsetToTriples relationsMap synset) baseIRI) synsets
+    synsetsTriples = foldMap (\synset -> runRDFGen
+                               (synsetToTriples textToCanonicMap canonicToRDFMap synset)
+                               baseIRI)
+                     synsets
 
 lexicographerFilesToTriples :: IRI -> FilePath -> App ()
 lexicographerFilesToTriples baseIRI outputFile = do
-  Config{relationRDFNames, lexFilePaths} <- ask
+  Config{textToCanonicNames, canonicToRDFNames, lexFilePaths} <- ask
   synsetsValid <- parseLexicographerFiles lexFilePaths
   liftIO $ case synsetsValid of
-    (Success synsets) -> synsetsToTriples relationRDFNames baseIRI synsets outputFile
+    (Success synsets) -> synsetsToTriples textToCanonicNames
+                                          canonicToRDFNames baseIRI synsets outputFile
     (Failure _) -> void
       $ putStrLn "Errors in lexicographer files, please validate them before exporting."
 

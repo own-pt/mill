@@ -268,8 +268,9 @@ wordSenseIdIRI (WordSenseIdentifier wnIdentifier) =
 synsetIdentifierToIRI :: SynsetIdentifier -> RDFGen IRI
 synsetIdentifierToIRI (SynsetIdentifier wnIdentifier) = wnIdentifierToIRI "synset" wnIdentifier
 
-synsetToTriples :: Map Text Text -> Synset Validated -> RDFGen Triples
-synsetToTriples relationsMap Synset{lexicographerFileId, wordSenses, definition, examples
+synsetToTriples :: Map Text Text -> Map Text Text -> Synset Validated -> RDFGen Triples
+synsetToTriples textToCanonicMap canonicToRDFMap
+  Synset{lexicographerFileId, wordSenses, definition, examples
                                    , frames = synsetFrames, relations} = do
   lexicographerFileLiteral   <- object lexicographerFileId
   synsetIri                  <- IRISubject <$> synsetIriGen
@@ -306,9 +307,16 @@ synsetToTriples relationsMap Synset{lexicographerFileId, wordSenses, definition,
     makePredicate relationName
       = fmap Predicate . appBaseIRI
       $ Endo (\baseIri -> baseIri {iriPath = toRDFName relationName})
-    toRDFName relationName =
-      fromMaybe (error $ "Inexisting relation " ++ T.unpack relationName ++ " on relations.tsv")
-            $ M.lookup relationName relationsMap
+    lookupRelation relationName textToCanonicMap' canonicToRDFMap'
+      =  case M.lookup relationName textToCanonicMap' of
+           Nothing -> fromMaybe (error $ "Inexisting relation "
+                                          ++ T.unpack relationName ++ " on relations.tsv")
+                         $ M.lookup relationName canonicToRDFMap'
+           Just canonicName -> fromMaybe (error $ "Inexisting relation "
+                                          ++ T.unpack relationName ++ " on relations.tsv")
+                         $ M.lookup canonicName canonicToRDFMap'
+    toRDFName textName =
+      lookupRelation textName textToCanonicMap canonicToRDFMap
     synsetIriGen = synsetIdentifierToIRI (SynsetIdentifier headWordId)
     headWordId = (\(WNWord (WordSenseIdentifier wnIdentifier) _ _) -> wnIdentifier)
       $ NE.head wordSenses
