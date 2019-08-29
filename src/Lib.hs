@@ -3,13 +3,15 @@ module Lib
     , parseLexicographerFiles
     , validateLexicographerFile
     , validateLexicographerFiles
+    , lexicographerFilesJSON
     , lexicographerFilesToTriples
     , readConfig
     , lexicographerFilesInDirectoryToTriples
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
-            , synsetToTriples, Validation(..), SourceValidation )
+            , Validation(..), SourceValidation )
+import Export (synsetToTriples,synsetsToSynsetJSONs)
 import Parse (parseLexicographer)
 import Validate ( makeIndex
                 , validateSynsets )
@@ -18,15 +20,16 @@ import Control.Monad (unless,(>>))
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Binary (encodeFile)
 import Data.Binary.Builder (toLazyByteString)
+import Data.ByteString.Builder (hPutBuilder)
 import qualified Data.DList as DL
 import Data.Either (partitionEithers)
 import Data.Functor(void)
 import Data.List (partition)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
 import Data.RDF.ToRDF (runRDFGen)
 import Data.RDF.Types (RDFGraph(..), IRI(..))
@@ -35,11 +38,12 @@ import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Data.Text.Prettyprint.Doc (Pretty(..))
+import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 import qualified Data.Text.Read as TR
 import System.Directory (canonicalizePath, doesDirectoryExist)
 import System.FilePath ((</>), normalise,equalFilePath)
-import Data.Text.Prettyprint.Doc (Pretty(..))
-import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
+import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
 
 -- | This datastructure contains the information found in the
 -- configuration files (currently only lexnames.tsv and relations.tsv
@@ -121,6 +125,22 @@ parseLexicographerFiles filePaths = do
           index   = makeIndex synsets
       in return $ validateSynsets index synsets
     Failure sourceErrors -> return $ Failure sourceErrors
+
+lexicographerFilesJSON :: FilePath -> App ()
+lexicographerFilesJSON outputFile = do
+  Config{lexFilePaths, lexnamesToId} <- ask
+  validationResults <- parseLexicographerFiles lexFilePaths
+  case validationResults of
+    Success synsets -> let jsonBuilder = synsetsToSynsetJSONs lexnamesToId synsets
+                       in liftIO
+                          $ withFile outputFile WriteMode (`write` jsonBuilder) 
+    Failure errors -> liftIO $ prettyPrintList errors
+  where
+    write handle builder = do
+      _ <- handle `hSetBinaryMode` True
+      _ <- handle `hSetBuffering` BlockBuffering Nothing
+      handle `hPutBuilder` builder
+  
 
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)

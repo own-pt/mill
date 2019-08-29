@@ -41,11 +41,11 @@ checkIndexNoDuplicates = foldWithKey go (Success empty)
 
 wordSenseKey :: WNWord -> String
 wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _)
-  = senseKey lexicographerFileId wordForm lexicalId
+  = indexKey lexicographerFileId wordForm lexicalId
 
-senseKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
+indexKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 -- [ ] this is not really a sense key
-senseKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
+indexKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
   intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, show lexicalId]
 
 
@@ -92,7 +92,7 @@ checkSynsetRelationsTargets index = traverse checkSynsetRelation
       then Success synsetRelation
       else Failure (MissingSynsetRelationTarget synsetRelation :| []) -- []
       where
-        targetSenseKey = senseKey lexFileId wordForm lexicalId
+        targetSenseKey = indexKey lexFileId wordForm lexicalId
 
 validateSorted :: Ord a => [a] -> Validation (NonEmpty (NonEmpty a)) [a]
 -- maybe just sort input instead of picking some of the errors?
@@ -156,7 +156,7 @@ checkWordSensePointersTargets index = traverse checkWordPointer
       then Success wordPointer
       else Failure (MissingWordRelationTarget wordPointer :| []) -- []
       where
-        targetSenseKey = senseKey lexFileId wordForm lexicalId
+        targetSenseKey = indexKey lexFileId wordForm lexicalId
 
 validateSynsets :: Index (NonEmpty (Synset Unvalidated))
   -> NonEmpty (Synset Unvalidated)
