@@ -6,7 +6,7 @@
   ;; Not having a mill interpreter is a serious problem which should cause
   ;; the backend to disable itself, so an error is signaled.
   (unless (executable-find "mill")
-    (error "Cannot find a suitable mill"))
+    (error "Cannot find a suitable mill executable"))
   ;; If a live process launched in an earlier check was found, that
   ;; process is killed.  When that process's sentinel eventually runs,
   ;; it will notice its obsoletion, since it have since reset

@@ -10,7 +10,8 @@ module Lib
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
-            , Validation(..), SourceValidation )
+            , Validation(..), SourceValidation, singleton
+            , SourceError(..), WNError(..), SourcePosition(..) )
 import Export (synsetToTriples,synsetsToSynsetJSONs)
 import Parse (parseLexicographer)
 import Validate ( makeIndex
@@ -24,7 +25,7 @@ import Data.ByteString.Builder (hPutBuilder)
 import qualified Data.DList as DL
 import Data.Either (partitionEithers)
 import Data.Functor(void)
-import Data.List (partition)
+import Data.List (partition,intercalate)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -157,20 +158,32 @@ validateSynsetsNoParseErrors indexSynsets maybeSynsetsToValidate =
     
 validateLexicographerFile :: FilePath -> App ()
 validateLexicographerFile filePath = do
-  let normalFilePath = normalise filePath
+  normalFilePath <- liftIO $ canonicalizePath filePath
   Config{lexFilePaths} <- ask
   case partition (equalFilePath normalFilePath) $ NE.toList lexFilePaths of
     ([fileToValidate], otherLexicographerFiles) -> go fileToValidate otherLexicographerFiles
     ([], lexFiles) -> go normalFilePath lexFiles
     _       -> liftIO . putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
+    go :: FilePath -> [FilePath] -> App ()
     go fileToValidate otherFiles = do
-      lexFilesSynsetsOrErrors <- mapM parseLexicographerFile (fileToValidate:|otherFiles)
-      liftIO $ case sequenceA lexFilesSynsetsOrErrors of
-        Failure parseErrors
+      lexFilesSynsetsOrErrors <- mapM parseLexicographerFile otherFiles
+      lexFileSynsetsOrErrors  <- parseLexicographerFile fileToValidate
+      liftIO $ case (sequenceA lexFilesSynsetsOrErrors, lexFileSynsetsOrErrors) of
+        (Failure parseErrors, Success _)
+          -> prettyPrintList $ toSingleError parseErrors
+        (Failure parseErrors, Failure fileParseErrors)
+          -> prettyPrintList (toSingleError parseErrors <> fileParseErrors)
+        (Success _, Failure parseErrors)
           -> prettyPrintList parseErrors
-        Success lexFilesSynsets@(synsetsToValidate:|_)
-          -> validateSynsetsNoParseErrors lexFilesSynsets (Just synsetsToValidate)
+        (Success lexFilesSynsets, Success synsetsToValidate)
+          -> validateSynsetsNoParseErrors (synsetsToValidate:|lexFilesSynsets) (Just synsetsToValidate)
+    toSingleError
+      = singleton
+      . (\filesWithErrors -> SourceError (T.pack filePath) (SourcePosition (1,4))
+          (ParseError $ "ParseErrors in files: " ++ intercalate ", " (NE.toList filesWithErrors)))
+      . NE.nub
+      . NE.map (\(SourceError fileWithErrors _ _) -> T.unpack fileWithErrors)
 
 validateLexicographerFiles :: App ()
 validateLexicographerFiles = do
