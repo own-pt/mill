@@ -11,7 +11,8 @@ module Lib
 
 import Data ( Synset(..), Unvalidated, Validated
             , Validation(..), SourceValidation, singleton
-            , SourceError(..), WNError(..), SourcePosition(..) )
+            , SourceError(..), WNError(..), SourcePosition(..)
+            , WNObj(..), readWNObj, WNPOS(..), readWNPOS )
 import Export (synsetToTriples,synsetsToSynsetJSONs)
 import Parse (parseLexicographer)
 import Validate ( makeIndex
@@ -56,14 +57,15 @@ data Config = Config
   , textToCanonicNames :: Map Text Text
   -- | maps canonical relation names to their RDF names
   , canonicToRDFNames  :: Map Text Text
+  -- | maps canonic relation names to their possible domains
+  , canonicToDomain    :: Map Text (NonEmpty WNObj, NonEmpty WNPOS)
   -- | contains the filepaths to the files in the WordNet
   , lexFilePaths       :: NonEmpty FilePath
   } deriving (Show,Eq)
 
-readTSV :: Ord a => FilePath -> ([Text] -> Either String [(a, b)]) -> IO (Map a b)
-readTSV filepath readLine = do
-  text <- TIO.readFile filepath
-  case go text of
+readTSV :: Ord a => Text -> ([Text] -> Either String [(a, b)]) -> IO (Map a b)
+readTSV input readLine =
+  case go input of
     ([], pairs) -> return . M.fromList $ concat pairs
     (errors, _) -> mapM_ putStrLn errors >> return M.empty
   where
@@ -81,12 +83,16 @@ readConfig configurationDir' = do
   go configurationDir
   where
     go configurationDir = do
-      lexnamesToId       <- readTSV (configurationDir </> "lexnames.tsv") lexnamesReader
-      -- FIXME: reading file twice, but oh well..
-      textToCanonicNames <- readTSV (configurationDir </> "relations.tsv") textToCanonicNamesReader
-      canonicToRDFNames  <- readTSV (configurationDir </> "relations.tsv") canonicToRDFNamesReader
+      lexNamesInput      <- TIO.readFile $ configurationDir </> "lexnames.tsv"
+      lexnamesToId       <- readTSV lexNamesInput lexnamesReader
+      relationsInput     <- TIO.readFile $ configurationDir </> "relations.tsv"
+      textToCanonicNames <- readTSV relationsInput textToCanonicNamesReader
+      canonicToRDFNames  <- readTSV relationsInput canonicToRDFNamesReader
+      canonicToDomain    <- readTSV relationsInput canonicToDomainReader
       let lexFilePaths = lexFilePaths' lexnamesToId
-      return $ Config {lexnamesToId, textToCanonicNames, canonicToRDFNames, lexFilePaths}
+      return $ Config {lexnamesToId, textToCanonicNames
+                      , canonicToRDFNames, lexFilePaths, canonicToDomain
+                      }
         where
           lexFilePaths' lexNamesMap =
             let lexnames = map normalize (M.keys lexNamesMap)
@@ -105,15 +111,21 @@ readConfig configurationDir' = do
           textToCanonicNamesReader _ = Left "Wrong number of fields in relations.tsv"
           canonicToRDFNamesReader  [canonicName,_,_,rdfName,_,_,_] = Right [(canonicName, rdfName)]
           canonicToRDFNamesReader _ = Left "Wrong number of fields in relations.tsv"
+          canonicToDomainReader [canonicName,_,_,_,pos,domain,_] =
+            Right [(canonicName, ( readListField readWNObj domain
+                                 , readListField readWNPOS pos))]
+          canonicToDomainReader _ = Left "wrong number of Fiels in relations.tsv"
+          readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
+                                                                 
 
 type App = ReaderT Config IO
 
 parseLexicographerFile :: FilePath -> App (SourceValidation (NonEmpty (Synset Unvalidated)))
 parseLexicographerFile filePath = do
-  Config{textToCanonicNames} <- ask
+  Config{textToCanonicNames, canonicToDomain} <- ask
   liftIO $ do
     content <- TIO.readFile $ normalise filePath
-    let result = parseLexicographer textToCanonicNames filePath content
+    let result = parseLexicographer textToCanonicNames canonicToDomain filePath content
     return result
 
 parseLexicographerFiles ::  NonEmpty FilePath

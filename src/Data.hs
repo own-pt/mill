@@ -23,7 +23,28 @@ import Text.Printf (printf)
 singleton :: a -> NonEmpty a
 singleton x = x :| []
 
+data WNObj = SynsetObj | WordObj deriving (Eq,Enum)
+
+instance Show WNObj where
+  show SynsetObj = "synset"
+  show WordObj   = "word"
+
+readWNObj :: Text -> WNObj
+readWNObj input = case input of
+  "synset" -> SynsetObj
+  "word"   -> WordObj
+  _        -> error . T.unpack
+    $ T.intercalate " " ["Can't parse", input, "as WordNet object name (one of synset or word)"]
+
 data WNPOS = A | S | R | N | V deriving (Eq,Enum,Ord,Show)
+
+readWNPOS :: Text -> WNPOS
+readWNPOS "n" = N
+readWNPOS "a" = A
+readWNPOS "r" = R
+readWNPOS "v" = V
+readWNPOS "s" = S
+readWNPOS input = error $ T.unpack input ++ " is not a valid PoS"
 
 newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Eq,Ord,Show)
 
