@@ -25,12 +25,10 @@ pertainsTo	\	pe	wn30/own-pt/schema/pertainsTo	ar	word	Pertainym pertains to noun
 seeAlso	^	see	wn30/own-pt/schema/seeAlso	va	synset,word	Also see
 hyponymOf	~	hypo	wn30/own-pt/schema/hyponymOf	nv	synset	Hyponym
 hasInstance	~i	ihypo	wn30/own-pt/schema/hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)
--- don't specify text file names for these, as these are used by the
--- parser, which interprets them as valid relations and creates bugs
 lexicographerFile	_	_	wn30/own-pt/schema/lexicographerFile	nvar	synset	lexicographer file relation
-definition	_	_	wn30/own-pt/schema/definition	nvar	synset	definition relation
-example	_	_	wn30/own-pt/schema/example	nvar	synset	example relation
-containsWordSense	_	_	wn30/own-pt/schema/containsWordSense	nvar	synset	contains word sense relation
-frame	_	_	wn30/own-pt/schema/frame	nvar	synset,word	frame relation
+definition	_	d	wn30/own-pt/schema/definition	nvar	synset	definition relation
+example	_	e	wn30/own-pt/schema/example	nvar	synset	example relation
+containsWordSense	_	w	wn30/own-pt/schema/containsWordSense	nvar	synset	contains word sense relation
+frame	_	fs	wn30/own-pt/schema/frame	nvar	synset,word	frame relation
 lexicalForm	_	_	wn30/own-pt/schema/lexicalForm	nvar	synset	lexicographer file relation
 syntacticMarker	_	marker	wn30/own-pt/schema/syntacticMarker	a	word	   marker

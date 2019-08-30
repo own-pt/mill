@@ -141,7 +141,9 @@ relationNameP name = do
   relationsMap <- reader snd
   relationName <- name
   case M.lookup relationName relationsMap of
-    Just _ -> return relationName
+    Just _ -> if relationName `elem` ["d", "e", "fs", "w"]
+              then fail "Synset components must come in the following order: words, definition, examples, frames, and synset relations"
+              else return relationName
     Nothing -> failure (Just $ toErrorItem relationName)
                        (S.fromList . map toErrorItem $ M.keys relationsMap)
   where
