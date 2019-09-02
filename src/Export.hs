@@ -7,12 +7,14 @@ import Data ( WordSenseForm(..), LexicographerFileId(..)
             , LexicalId(..), WordSenseIdentifier(..)
             , SynsetIdentifier(..), Synset(..), Validated
             , SynsetRelation(..), WordPointer(..), WNWord(..)
-            , lexicographerFileIdToText, senseKey, synsetType)
+            , lexicographerFileIdToText, senseKey, synsetType
+            , WNPOS(..) )
 ---
 import Control.Monad.Trans.Reader (ask)
 import Data.Aeson (ToJSON(..), genericToEncoding, defaultOptions, fromEncoding)
 import Data.ByteString.Builder (Builder,charUtf8)
 import qualified Data.DList as DL
+import Data.List (find)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
@@ -137,12 +139,13 @@ instance ToJSON SynsetJSON where
 synsetToSynsetJSON :: Map Text Int -> Synset Validated -> SynsetJSON
 synsetToSynsetJSON lexNamesToLexNum
   Synset{lexicographerFileId = lexFileId@(LexicographerFileId (wnPOS, lexName'))
-        , wordSenses, definition, examples
+        , wordSenses, definition, examples, relations
         }
   = SynsetJSON { lexname    = lexName'
                , pos        = head $ show wnPOS
                , terms      = NE.map toTerm wordSenses
-               , keys       = NE.map (senseKey lexFileNum $ synsetType wnPOS) wordSenses
+               , keys       =
+                 NE.map (senseKey lexFileNum (synsetType wnPOS) maybeHeadSynset) wordSenses
                , definition = definition
                , examples   = examples
                }
@@ -151,7 +154,12 @@ synsetToSynsetJSON lexNamesToLexNum
     lexFileNum = fromMaybe (error $ "No lexfile with name "
                             ++ show lexName ++ "found in lexnames.tsv")
                  $ M.lookup lexName lexNamesToLexNum
-    toTerm (WNWord (WordSenseIdentifier (_,wordForm,_)) _ _) =  wordForm
+    toTerm (WNWord (WordSenseIdentifier (_,wordForm,_)) _ _) = wordForm
+    isHeadRelation (SynsetRelation "sim" _) = True
+    isHeadRelation _ = False
+    maybeHeadSynset = case wnPOS of
+      S -> find isHeadRelation relations
+      _ -> Nothing
 
 synsetsToSynsetJSONs :: Map Text Int -> NonEmpty (Synset Validated) -> Builder
 synsetsToSynsetJSONs lexNamesToLexNum synsets

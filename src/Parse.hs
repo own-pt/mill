@@ -60,16 +60,16 @@ parseLexicographer textToCanonicNames canonicToDomain fileName inputText =
 
 lexicographerIdP :: Parser LexicographerFileId
 lexicographerIdP = do
-  pos     <- posP
+  maybePos     <- posP
   _       <- char '.'
   lexname <- lexnameP
-  return $ LexicographerFileId (pos, lexname)
+  case maybePos of
+    Nothing  -> failure Nothing (S.fromList
+                                 $ map toErrorItem ["noun", "verb", "adj", "adjs", "adv"])
+    Just pos -> return $ LexicographerFileId (pos, lexname)
   where
-    posP = N <$ string "noun"
-       <|> V <$ string "verb"
-       <|> S <$ string "adjs"
-       <|> A <$ string "adj"
-       <|> R <$ string "adv"
+    toErrorItem = Label . NE.fromList
+    posP     = readLongWNPOS <$> takeWhile1P Nothing (/= '.')
     lexnameP = lexeme (takeWhile1P Nothing (`notElem` [' ','\t',':','\n'])
                  <?> "Lexicographer file name (must not contain whitespace or a colon)")
 
