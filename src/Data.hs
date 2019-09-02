@@ -7,10 +7,8 @@ module Data where
 
 import Data.Aeson (ToJSON(..), genericToEncoding, defaultOptions)
 import Data.Bifunctor (Bifunctor(..))
-import Data.List (find)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe)
 import Data.RDF.ToRDF (ToObject(..))
 import Data.RDF.Types (Object(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
@@ -119,22 +117,20 @@ type FrameIdentifier = Int
 data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
   deriving (Eq,Ord,Show)
 
-senseKey :: Int -> Int -> WNWord -> String
-senseKey lexFileNum synsetTypeNum wordSense@(WNWord (WordSenseIdentifier (_,WordSenseForm wordForm,LexicalId lexicalId)) _ wordPointers)
+senseKey :: Int -> Int -> Maybe SynsetRelation -> WNWord -> String
+senseKey lexFileNum synsetTypeNum maybeHeadRelation
+  wordSense@(WNWord (WordSenseIdentifier (_,WordSenseForm wordForm,LexicalId lexicalId)) _ _)
   = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum
                                 lexicalId headWordForm (headWordLexicalId :: String)
   where
     lemma = T.toLower wordForm
-    findHead 5 = Just . fromMaybe (error $ "No head synset found for " ++ show wordSense) $ find isHeadPointer wordPointers
-    findHead n | n `elem` [1,2,3,4] = Nothing
-    findHead n = error $ "No possible synset type of " ++ show n
-    isHeadPointer (WordPointer "sim" _) = True
-    isHeadPointer _ = False
     (headWordForm, headWordLexicalId) =
-      case findHead synsetTypeNum of
-        Nothing -> ("", "")
-        Just (WordPointer _ (WordSenseIdentifier (_, WordSenseForm headForm, LexicalId headLexicalId)))
+      case (synsetTypeNum, maybeHeadRelation) of
+        (5, Just (SynsetRelation _
+                  (SynsetIdentifier (_,WordSenseForm headForm,LexicalId headLexicalId))))
           -> (T.toLower headForm, printf "%02d" headLexicalId)
+        (5,Nothing) -> error $ "No head synset found for " ++ show wordSense
+        _           -> ("", "")
 
 
 newtype SourcePosition = SourcePosition (Int, Int) deriving (Show,Eq,Ord)
