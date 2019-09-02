@@ -12,7 +12,7 @@ module Lib
 import Data ( Synset(..), Unvalidated, Validated
             , Validation(..), SourceValidation, singleton
             , SourceError(..), WNError(..), SourcePosition(..)
-            , WNObj(..), readWNObj, WNPOS(..), readWNPOS )
+            , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS )
 import Export (synsetToTriples,synsetsToSynsetJSONs)
 import Parse (parseLexicographer)
 import Validate ( makeIndex
@@ -113,7 +113,7 @@ readConfig configurationDir' = do
           canonicToRDFNamesReader _ = Left "Wrong number of fields in relations.tsv"
           canonicToDomainReader [canonicName,_,_,_,pos,domain,_] =
             Right [(canonicName, ( readListField readWNObj domain
-                                 , readListField readWNPOS pos))]
+                                 , readListField readShortWNPOS pos))]
           canonicToDomainReader _ = Left "wrong number of Fiels in relations.tsv"
           readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
                                                                  

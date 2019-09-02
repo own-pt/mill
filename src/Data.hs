@@ -38,13 +38,21 @@ readWNObj input = case input of
 
 data WNPOS = A | S | R | N | V deriving (Eq,Enum,Ord,Show)
 
-readWNPOS :: Text -> WNPOS
-readWNPOS "n" = N
-readWNPOS "a" = A
-readWNPOS "r" = R
-readWNPOS "v" = V
-readWNPOS "s" = S
-readWNPOS input = error $ T.unpack input ++ " is not a valid PoS"
+readShortWNPOS :: Text -> WNPOS
+readShortWNPOS "n" = N
+readShortWNPOS "a" = A
+readShortWNPOS "r" = R
+readShortWNPOS "v" = V
+readShortWNPOS "s" = S
+readShortWNPOS input = error $ T.unpack input ++ " is not a valid PoS"
+
+readLongWNPOS :: Text -> Maybe WNPOS
+readLongWNPOS "noun" = Just N
+readLongWNPOS "verb" = Just V
+readLongWNPOS "adjs" = Just S
+readLongWNPOS "adj"  = Just A
+readLongWNPOS "adv"  = Just R
+readLongWNPOS _      = Nothing
 
 newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Eq,Ord,Show)
 
@@ -68,13 +76,9 @@ lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) =
 lexicographerFileIdFromText :: Text -> Maybe LexicographerFileId
 lexicographerFileIdFromText = go . T.breakOn "."
   where
-    wrap pos name = Just $ LexicographerFileId (pos, T.tail name)
-    go ("noun",name) = wrap N name
-    go ("verb",name) = wrap V name
-    go ("adj",name)  = wrap A name
-    go ("adjs",name) = wrap S name
-    go ("adv",name)  = wrap R name
-    go _             = Nothing
+    wrap pos name = LexicographerFileId (pos
+                                        , T.tail name) -- remove '.'
+    go (pos, name) = wrap <$> readLongWNPOS pos <*> Just name
 
 instance ToObject LexicographerFileId where
   object lexicographerFileId
