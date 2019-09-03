@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Validate
   ( validateSynsets
   , makeIndex
@@ -11,12 +12,13 @@ import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Data.GenericTrie (Trie, fromListWith', member, foldWithKey, empty, insert)
+import Data.ListTrie.Base.Map (WrappedIntMap)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',empty,insert,foldlWithKey',member)
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
-type Index a = Trie String a
+type Index a = TrieMap WrappedIntMap Char a
 
 makeIndex :: NonEmpty (Synset Unvalidated) -> Index (NonEmpty (Synset Unvalidated))
 makeIndex synsets = fromListWith' (<>) keyValuePairs
@@ -29,7 +31,7 @@ makeIndex synsets = fromListWith' (<>) keyValuePairs
         (headSenseKey, value) : map (\wordSense -> (wordSenseKey wordSense, value)) wordSenses
 
 checkIndexNoDuplicates :: Index (NonEmpty (Synset Unvalidated)) -> SourceValidation (Index (Synset Unvalidated))
-checkIndexNoDuplicates = foldWithKey go (Success empty)
+checkIndexNoDuplicates = foldlWithKey' go (Success empty)
   where
     go key (value :| []) noDuplicatesTrie
       = Success (insert key value) <*> noDuplicatesTrie
