@@ -1,6 +1,7 @@
 module Main where
 
-import Lib ( validateLexicographerFile
+import Lib (-- validateLexicographerFile
+           validateLexicographerFile'
            , validateLexicographerFiles
            , lexicographerFilesJSON
            , lexicographerFilesInDirectoryToTriples
@@ -81,7 +82,7 @@ main = do
       config <- readConfig $ takeDirectory filepath
       runReaderT (if isDirectory
                   then validateLexicographerFiles
-                  else validateLexicographerFile filepath)
+                  else validateLexicographerFile' filepath)
         config
     (ExportRDFCommand baseIri lexDirectory outputFile) -> do
       config <- readConfig lexDirectory

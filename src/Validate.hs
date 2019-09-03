@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Validate
   ( validateSynsets
+  , checkIndexNoDuplicates
+  , indexSynsets
   , makeIndex
   , Index
   ) where
@@ -13,7 +15,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
-import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',empty,insert,foldlWithKey',member)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',empty,insert,foldlWithKey',member,toList)
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
@@ -30,7 +32,9 @@ makeIndex synsets = fromListWith' (<>) keyValuePairs
       in
         (headSenseKey, value) : map (\wordSense -> (wordSenseKey wordSense, value)) wordSenses
 
-checkIndexNoDuplicates :: Index (NonEmpty (Synset Unvalidated)) -> SourceValidation (Index (Synset Unvalidated))
+checkIndexNoDuplicates :: Index (NonEmpty (Synset Unvalidated))
+  -> SourceValidation (Index (Synset Unvalidated))
+-- FIXME: use mapAccum'?
 checkIndexNoDuplicates = foldlWithKey' go (Success empty)
   where
     go key (value :| []) noDuplicatesTrie
@@ -160,19 +164,18 @@ checkWordSensePointersTargets index = traverse checkWordPointer
       where
         targetSenseKey = indexKey lexFileId wordForm lexicalId
 
-validateSynsets :: Index (NonEmpty (Synset Unvalidated))
+validateSynsets :: Index (Synset Unvalidated)
   -> NonEmpty (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
-validateSynsets indexWithDuplicates (firstSynset:|synsets) =
-  checkSynsetsOrder . checkSynsets $ checkIndexNoDuplicates indexWithDuplicates
+validateSynsets index (firstSynset:|synsets) =
+  checkSynsetsOrder checkedSynsets
   where
     checkSynsetsOrder (Success validatedSynsets)
       = bimap (NE.map toError) NE.fromList . validateSorted $ NE.toList validatedSynsets
     checkSynsetsOrder (Failure es) = Failure es
     toError unsortedSynsetSequences@(synset:|_)
       = toSourceError synset $ UnsortedSynsets (unsortedSynsetSequences :| [])
-    checkSynsets (Failure errors) = Failure errors
-    checkSynsets (Success index)
+    checkedSynsets
       = (:|)
       <$> checkSynset' firstSynset
       <*> foldr go (Success []) synsets
@@ -180,5 +183,10 @@ validateSynsets indexWithDuplicates (firstSynset:|synsets) =
         checkSynset' = checkSynset index
         go synset result = (:) <$> checkSynset' synset <*> result
 
+indexSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
+indexSynsets = map snd . filter isHead . toList
+  where
+    isHead (key,Synset{wordSenses = (headWordSense:|_)})
+      = key == wordSenseKey headWordSense
 ---
 
