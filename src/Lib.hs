@@ -1,9 +1,8 @@
 module Lib
     ( parseLexicographerFile
     , parseLexicographerFiles
-    , validateLexicographerFile
     , build
-    , validateLexicographerFile'
+    , validateLexicographerFile
     , validateLexicographerFiles
     , lexicographerFilesJSON
     , lexicographerFilesToTriples
@@ -29,12 +28,11 @@ import Data.Binary.Builder (toLazyByteString)
 import Data.ByteString.Builder (hPutBuilder)
 import qualified Data.DList as DL
 import Data.Either (partitionEithers)
-import Data.List (partition,intercalate,find)
+import Data.List (intercalate,find)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
 import Data.RDF.Encoder.NQuads (encodeRDFGraph)
 import Data.RDF.ToRDF (runRDFGen)
 import Data.RDF.Types (RDFGraph(..), IRI(..))
@@ -165,50 +163,11 @@ lexicographerFilesJSON outputFile = do
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)
 
-validateSynsetsNoParseErrors :: NonEmpty (NonEmpty (Synset Unvalidated))
-  -> Maybe (NonEmpty (Synset Unvalidated))
-  -> IO ()
-validateSynsetsNoParseErrors indexSynsets' maybeSynsetsToValidate =
-  let synsets = sconcat indexSynsets'
-      validIndex   = checkIndexNoDuplicates $ makeIndex synsets
-  in case validate (flip validateSynsets $ fromMaybe synsets maybeSynsetsToValidate) validIndex of
-    Success _ -> return ()
-    Failure errors -> prettyPrintList errors
-    
-validateLexicographerFile :: FilePath -> App ()
-validateLexicographerFile filePath = do
-  normalFilePath <- liftIO $ canonicalizePath filePath
-  Config{lexFilePaths} <- ask
-  case partition (equalFilePath normalFilePath) $ NE.toList lexFilePaths of
-    ([fileToValidate], otherLexicographerFiles) -> go fileToValidate otherLexicographerFiles
-    ([], lexFiles) -> go normalFilePath lexFiles
-    _       -> liftIO . putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
-  where
-    go :: FilePath -> [FilePath] -> App ()
-    go fileToValidate otherFiles = do
-      lexFilesSynsetsOrErrors <- mapM parseLexicographerFile otherFiles
-      lexFileSynsetsOrErrors  <- parseLexicographerFile fileToValidate
-      liftIO $ case (sequenceA lexFilesSynsetsOrErrors, lexFileSynsetsOrErrors) of
-        (Failure parseErrors, Success _)
-          -> prettyPrintList $ toSingleError parseErrors
-        (Failure parseErrors, Failure fileParseErrors)
-          -> prettyPrintList (toSingleError parseErrors <> fileParseErrors)
-        (Success _, Failure parseErrors)
-          -> prettyPrintList parseErrors
-        (Success lexFilesSynsets, Success synsetsToValidate)
-          -> validateSynsetsNoParseErrors (synsetsToValidate:|lexFilesSynsets) (Just synsetsToValidate)
-    toSingleError
-      = singleton
-      . (\filesWithErrors -> SourceError (T.pack filePath) (SourcePosition (1,4))
-          (ParseError $ "ParseErrors in files: " ++ intercalate ", " (NE.toList filesWithErrors)))
-      . NE.nub
-      . NE.map (\(SourceError fileWithErrors _ _) -> T.unpack fileWithErrors)
-
 getCachePath :: IO FilePath
 getCachePath = getXdgDirectory XdgCache "mill"
 
-validateLexicographerFile' :: FilePath -> App ()
-validateLexicographerFile' filePath = do
+validateLexicographerFile :: FilePath -> App ()
+validateLexicographerFile filePath = do
   normalFilePath   <- liftIO $ canonicalizePath filePath
   _ <- build
   Config{lexFilePaths} <- ask
@@ -218,12 +177,6 @@ validateLexicographerFile' filePath = do
       ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
       _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
-    readCachedIndex :: FilePath
-      -> IO (SourceValidation (Index (Synset Unvalidated)))
-    readCachedIndex lexFilePath = do
-      cachePath <- getCachePath
-      let indexPath  = cachePath </> takeFileName lexFilePath <.> "index"
-      decodeFile indexPath
     go :: FilePath -> [FilePath] -> IO ()
     go fileToValidate lexFilePaths = do
       validationTargetFileIndex <- readCachedIndex fileToValidate
@@ -253,12 +206,29 @@ validateLexicographerFile' filePath = do
 validateLexicographerFiles :: App ()
 validateLexicographerFiles = do
   Config{lexFilePaths} <- ask
-  lexFilesSynsetsOrErrors <- mapM parseLexicographerFile lexFilePaths
-  liftIO $ case sequenceA lexFilesSynsetsOrErrors of
-    Failure parseErrors
+  validationIndices <- liftIO $ sequenceA <$> mapM readCachedIndex lexFilePaths
+  let validationIndex = bimap id sconcat validationIndices
+  liftIO $ case (validationIndex, validationIndices) of
+    (Failure parseErrors, _)
       -> prettyPrintList parseErrors
-    Success lexFilesSynsets
-      -> validateSynsetsNoParseErrors lexFilesSynsets Nothing
+    (Success index, Success indices)
+      -> mapM_ (go index) indices
+    (Success _, Failure _) -> return () -- never happens
+  where
+    go index targetIndex =
+     case indexSynsets targetIndex of
+       [] -> return ()
+       (x:synsets) -> case validateSynsets index (x:|synsets) of
+         Success _ -> return ()
+         Failure validationErrors -> prettyPrintList validationErrors
+           
+
+readCachedIndex :: FilePath
+  -> IO (SourceValidation (Index (Synset Unvalidated)))
+readCachedIndex lexFilePath = do
+  cachePath <- getCachePath
+  let indexPath  = cachePath </> takeFileName lexFilePath <.> "index"
+  decodeFile indexPath
 
 synsetsToTriples :: Map Text Text -> Map Text Text
   -> IRI -> NonEmpty (Synset Validated) -> FilePath -> IO ()

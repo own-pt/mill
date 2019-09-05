@@ -55,7 +55,7 @@ wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexica
 indexKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 -- [ ] this is not really a sense key
 indexKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
-  intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, show lexicalId]
+  intercalate "\t" [T.unpack wordForm, show lexicalId, show pos ++ T.unpack lexname]
 
 
 
