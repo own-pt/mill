@@ -29,7 +29,7 @@ import Data.Binary.Builder (toLazyByteString)
 import Data.ByteString.Builder (hPutBuilder)
 import qualified Data.DList as DL
 import Data.Either (partitionEithers)
-import Data.List (partition,intercalate)
+import Data.List (partition,intercalate,find)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -49,7 +49,8 @@ import qualified Data.Text.Read as TR
 import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
 import Development.Shake.FilePath ((<.>), (-<.>), takeFileName)
-import System.Directory (canonicalizePath, doesDirectoryExist)
+import System.Directory ( canonicalizePath, doesDirectoryExist
+                        , getXdgDirectory, XdgDirectory(..), doesDirectoryExist )
 import System.FilePath ((</>), normalise,equalFilePath)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
 
@@ -203,27 +204,32 @@ validateLexicographerFile filePath = do
       . NE.nub
       . NE.map (\(SourceError fileWithErrors _ _) -> T.unpack fileWithErrors)
 
+getCachePath :: IO FilePath
+getCachePath = getXdgDirectory XdgCache "mill"
+
 validateLexicographerFile' :: FilePath -> App ()
 validateLexicographerFile' filePath = do
-  normalFilePath <- liftIO $ canonicalizePath filePath
+  normalFilePath   <- liftIO $ canonicalizePath filePath
   _ <- build
   Config{lexFilePaths} <- ask
-  case NE.partition (equalFilePath normalFilePath) lexFilePaths of
-    ([fileToValidate], otherFilePaths) -> liftIO $ go (Right fileToValidate) otherFilePaths
-    ([], _) -> undefined --go normalFilePath index
-    _       -> liftIO . putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
+  liftIO $
+    case NE.partition (equalFilePath normalFilePath) lexFilePaths of
+      ([_], otherFilePaths) -> liftIO $ go normalFilePath otherFilePaths
+      ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
+      _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
     readCachedIndex :: FilePath
       -> IO (SourceValidation (Index (Synset Unvalidated)))
     readCachedIndex lexFilePath = do
-      let indexPath  = ".cache" </> takeFileName lexFilePath <.> "index"
+      cachePath <- getCachePath
+      let indexPath  = cachePath </> takeFileName lexFilePath <.> "index"
       decodeFile indexPath
-    go :: Either FilePath FilePath -> [FilePath] -> IO ()
-    go (Left _fileToValidate) _ = undefined -- when file is not in lexnames.tsv
-    go (Right fileToValidate) lexFilePaths = do
+    go :: FilePath -> [FilePath] -> IO ()
+    go fileToValidate lexFilePaths = do
       validationTargetFileIndex <- readCachedIndex fileToValidate
-      -- FIXME: use unionWith instead of sconcat
-      validationIndex <- fmap (bimap id sconcat . sequenceA . (:|) validationTargetFileIndex) $ mapM readCachedIndex lexFilePaths
+      -- FIXME: use unionWith instead of sconcat?
+      validationIndex <- bimap id sconcat . sequenceA . (:|) validationTargetFileIndex
+                      <$> mapM readCachedIndex lexFilePaths
       case (validationIndex, validationTargetFileIndex) of
         (Failure parseErrors, Success _)
           -> prettyPrintList $ toSingleError parseErrors
@@ -282,22 +288,26 @@ lexicographerFilesInDirectoryToTriples baseIriString =
 
 ---
 -- cache
-cacheFileIndex :: FilePath -> FilePath -> App ()
-cacheFileIndex lexFilePath outFilePath = do
-  result <- parseLexicographerFile lexFilePath
-  -- Failure x -> Failure x | Success x -> check x
-  let validIndex = bimap id makeIndex result
-  liftIO . encodeFile outFilePath
-    $ validate checkIndexNoDuplicates validIndex
-
 build :: App ()
 build = do
   config@Config{lexFilePaths} <- ask
-  liftIO . shake shakeOptions{ shakeFiles=".cache/", shakeThreads=0}
+  cachePath <- liftIO getCachePath
+  liftIO . shake shakeOptions{ shakeFiles=cachePath, shakeThreads=0 }
     $ do
-    want . map (flip (<.>) "index" . (</>) ".cache/" . takeFileName)
+    want . map (flip (<.>) "index" . (</>) cachePath . takeFileName)
       $ NE.toList lexFilePaths
-    ".cache/*.index" %> \out -> do
-        let lexFilePath = takeFileName out -<.> ""
-        need [lexFilePath]
-        liftIO $ runReaderT (cacheFileIndex lexFilePath out) config
+    cachePath </> "*.index" %> \out -> do
+        let lexFileName = takeFileName out -<.> ""
+            maybeLexFilePath = find ((==) lexFileName . takeFileName) lexFilePaths
+        case maybeLexFilePath of
+          Nothing -> fail $ lexFileName ++ " not in lexnames.tsv"
+          Just lexFilePath -> do
+            need [lexFilePath]
+            liftIO $ runReaderT (cacheFileIndex lexFilePath out) config
+   where
+     cacheFileIndex :: FilePath -> FilePath -> App ()
+     cacheFileIndex lexFilePath outFilePath = do
+       result <- parseLexicographerFile lexFilePath
+       let validIndex = bimap id makeIndex result
+       liftIO . encodeFile outFilePath
+         $ validate checkIndexNoDuplicates validIndex

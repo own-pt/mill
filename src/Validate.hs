@@ -15,7 +15,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
-import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',empty,insert,foldlWithKey',member,toList)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toList,mapAccumWithKey')
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
@@ -34,16 +34,19 @@ makeIndex synsets = fromListWith' (<>) keyValuePairs
 
 checkIndexNoDuplicates :: Index (NonEmpty (Synset Unvalidated))
   -> SourceValidation (Index (Synset Unvalidated))
--- FIXME: use mapAccum'?
-checkIndexNoDuplicates = foldlWithKey' go (Success empty)
+checkIndexNoDuplicates index =
+  case mapAccumWithKey' go [] index of
+    ([], indexNoDuplicates) -> Success indexNoDuplicates
+    (x:duplicateErrors, _)  -> Failure $ x:|duplicateErrors
   where
-    go key (value :| []) noDuplicatesTrie
-      = Success (insert key value) <*> noDuplicatesTrie
-    go key values noDuplicatesTrie
-      = case map (\synset -> toSourceError synset . DuplicateWordSense $ takeWhile (/= '\t') key)
-             $ NE.toList values of
-          [] -> noDuplicatesTrie
-          x:duplicateErrors -> Failure (x :| duplicateErrors) <*> noDuplicatesTrie
+    go duplicateErrors _ (value :| [])
+      = (duplicateErrors, value)
+    go duplicateErrors key values
+      = let moreDuplicateErrors
+              = map (\synset -> toSourceError synset . DuplicateWordSense $ takeWhile (/= '\t') key)
+              $ NE.toList values
+        in ( moreDuplicateErrors ++ duplicateErrors
+           , NE.head values )
 
 wordSenseKey :: WNWord -> String
 wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _)
