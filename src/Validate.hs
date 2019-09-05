@@ -48,11 +48,11 @@ checkIndexNoDuplicates index =
       = ( moreDuplicateErrors ++ duplicateErrors
         , NE.head values )
       where
-        lookupKey key' = case lookup key index of
+        lookupKey headKey = case lookup headKey index of
           Just values' ->
-            head . filter (elem key' . NE.map wordSenseKey . wordSenses) . rights
+            head . filter (elem key . NE.map wordSenseKey . wordSenses) . rights
             $ NE.toList values'
-          Nothing     -> error $ "Missing synset to key " ++ key
+          Nothing -> error $ "Missing synset to key " ++ key
         moreDuplicateErrors
           = map (\value -> toSourceError (either lookupKey id value)
                 . DuplicateWordSense $ takeWhile (/= '\t') key)

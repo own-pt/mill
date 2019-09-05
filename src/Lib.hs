@@ -199,7 +199,7 @@ validateLexicographerFile filePath = do
     toSingleError
       = singleton
       . (\filesWithErrors -> SourceError (T.pack filePath) (SourcePosition (1,4))
-          (ParseError $ "Parse errors in files: " ++ intercalate ", " (NE.toList filesWithErrors)))
+          (ParseError $ "Errors in files: " ++ intercalate ", " (NE.toList filesWithErrors))) -- either parse errors or duplication errors
       . NE.nub
       . NE.map (\(SourceError fileWithErrors _ _) -> T.unpack fileWithErrors)
 
