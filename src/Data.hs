@@ -57,7 +57,7 @@ readLongWNPOS _      = Nothing
 
 newtype LexicographerFileId = LexicographerFileId (WNPOS, Text)
   deriving (Eq,Generic,Ord,Show)
-  deriving newtype (Binary)
+  deriving anyclass (Binary)
 
 synsetType :: WNPOS -> Int
 synsetType N = 1
@@ -105,7 +105,7 @@ newtype WordSenseIdentifier =
                       , LexicalId
                       )
   deriving (Eq,Generic,Ord,Show)
-  deriving newtype (Binary)
+  deriving anyclass (Binary)
 
 makeWordSenseIdentifier :: LexicographerFileId -> WordSenseForm -> LexicalId
   -> WordSenseIdentifier
@@ -118,7 +118,7 @@ newtype SynsetIdentifier =
                    , LexicalId
                    )
   deriving (Eq,Generic,Ord,Show)
-  deriving newtype (Binary)
+  deriving anyclass (Binary)
 
 type PointerName = Text
 type RelationName = Text
@@ -148,7 +148,7 @@ senseKey lexFileNum synsetTypeNum maybeHeadRelation
 
 newtype SourcePosition = SourcePosition (Int, Int)
   deriving (Eq,Generic,Ord,Show)
-  deriving newtype (Binary)
+  deriving anyclass (Binary)
 
 -- synsets can be
 data Unvalidated deriving (Binary,Generic)

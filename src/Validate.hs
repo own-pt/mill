@@ -15,7 +15,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
-import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toList,mapAccumWithKey')
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toAscList,mapAccumWithKey')
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
@@ -187,7 +187,7 @@ validateSynsets index (firstSynset:|synsets) =
         go synset result = (:) <$> checkSynset' synset <*> result
 
 indexSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
-indexSynsets = map snd . filter isHead . toList
+indexSynsets = map snd . filter isHead . toAscList
   where
     isHead (key,Synset{wordSenses = (headWordSense:|_)})
       = key == wordSenseKey headWordSense
