@@ -24,6 +24,7 @@ default-extensions:
 - OverloadedStrings
 - NamedFieldPuns
 - DuplicateRecordFields
+- TupleSections
 
 dependencies:
 - aeson == 1.4.*

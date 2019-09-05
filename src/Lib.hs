@@ -199,12 +199,13 @@ validateLexicographerFile filePath = do
     toSingleError
       = singleton
       . (\filesWithErrors -> SourceError (T.pack filePath) (SourcePosition (1,4))
-          (ParseError $ "ParseErrors in files: " ++ intercalate ", " (NE.toList filesWithErrors)))
+          (ParseError $ "Parse errors in files: " ++ intercalate ", " (NE.toList filesWithErrors)))
       . NE.nub
       . NE.map (\(SourceError fileWithErrors _ _) -> T.unpack fileWithErrors)
 
 validateLexicographerFiles :: App ()
 validateLexicographerFiles = do
+  _ <- build
   Config{lexFilePaths} <- ask
   validationIndices <- liftIO $ sequenceA <$> mapM readCachedIndex lexFilePaths
   let validationIndex = bimap id sconcat validationIndices
