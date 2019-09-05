@@ -1,4 +1,4 @@
-;;; conllu-mode.el --- editing mode for edit wordnet data in human-readable text format files  -*- lexical-binding: t; -*-
+;;; mill-mode.el --- editing mode for edit wordnet data in human-readable text format files  -*- lexical-binding: t; -*-
 
 ;; dependencies
 

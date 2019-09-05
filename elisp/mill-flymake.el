@@ -1,4 +1,4 @@
-;;; mill-flymake.el --- A mill Flymake backend  -*- lexical-binding: t; -*-
+;;; mill.el --- A mill Flymake backend  -*- lexical-binding: t; -*-
 
 (defvar-local mill--flymake-proc nil)
 
