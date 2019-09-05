@@ -35,10 +35,8 @@ packages:
 # forks / in-progress versions pinned to a git hash. For example:
 #
 extra-deps:
-  - generic-trie-0.3.1@sha256:203cfc0086372abaf99ffb4b4b565eba8a28e6020f1104ec479cd96d0c3baeb7,1604
-#  - rdf4h-3.1.1@sha256:8a9d266a071467040f0acc9b9d95657595048bb32a0111a495badec2f27358c8,4091
-  - hgal-2.0.0.2@sha256:13d58afd0668b9cb881c612eff8488a0e289edd4bbffa893df4beee60cfeb73b,653
-  - rdf-0.1.0.3@sha256:c3635d546704a46291057be4a28d0bc13fe64caa807a40342e57ddec976cbf74,2216  
+  - rdf-0.1.0.3@sha256:c3635d546704a46291057be4a28d0bc13fe64caa807a40342e57ddec976cbf74,2216
+  - list-tries-0.6.6@sha256:73fcfe74bac103df7f026ce835a6923860e60712d4aed5758bb1e39a4e8738f8,4544
 # - acme-missiles-0.3
 # - git: https://github.com/commercialhaskell/stack.git
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a

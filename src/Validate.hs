@@ -1,5 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Validate
   ( validateSynsets
+  , checkIndexNoDuplicates
+  , indexSynsets
   , makeIndex
   , Index
   ) where
@@ -7,37 +10,53 @@ module Validate
 import Data
 
 import Data.Bifunctor (bimap)
+import Data.Either (either,rights)
 import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Data.GenericTrie (Trie, fromListWith', member, foldWithKey, empty, insert)
+import Data.ListTrie.Base.Map (WrappedIntMap)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toAscList,mapAccumWithKey',lookup,)
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
-type Index a = Trie String a
+type Index a = TrieMap WrappedIntMap Char (Either String a)
+type DupsIndex a = TrieMap WrappedIntMap Char (NonEmpty (Either String a))
 
-makeIndex :: NonEmpty (Synset Unvalidated) -> Index (NonEmpty (Synset Unvalidated))
+makeIndex :: NonEmpty (Synset Unvalidated) -> DupsIndex (Synset Unvalidated)
 makeIndex synsets = fromListWith' (<>) keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
     synsetPairs synset@Synset{wordSenses = (headWordSense:|wordSenses)} =
       let headSenseKey = wordSenseKey headWordSense
-          value        = singleton synset
       in
-        (headSenseKey, value) : map (\wordSense -> (wordSenseKey wordSense, value)) wordSenses
+        (headSenseKey, singleton $ Right synset)
+        : map ((, singleton $ Left headSenseKey) . wordSenseKey)
+              wordSenses
 
-checkIndexNoDuplicates :: Index (NonEmpty (Synset Unvalidated)) -> SourceValidation (Index (Synset Unvalidated))
-checkIndexNoDuplicates = foldWithKey go (Success empty)
+checkIndexNoDuplicates :: DupsIndex (Synset Unvalidated)
+  -> SourceValidation (Index (Synset Unvalidated))
+checkIndexNoDuplicates index =
+  case mapAccumWithKey' go [] index of
+    ([], indexNoDuplicates) -> Success indexNoDuplicates
+    (x:duplicateErrors, _)  -> Failure $ x:|duplicateErrors
   where
-    go key (value :| []) noDuplicatesTrie
-      = Success (insert key value) <*> noDuplicatesTrie
-    go key values noDuplicatesTrie
-      = case map (\synset -> toSourceError synset . DuplicateWordSense $ takeWhile (/= '\t') key)
-             $ NE.toList values of
-          [] -> noDuplicatesTrie
-          x:duplicateErrors -> Failure (x :| duplicateErrors) <*> noDuplicatesTrie
+    go duplicateErrors _ (value :| [])
+      = (duplicateErrors, value)
+    go duplicateErrors key values
+      = ( moreDuplicateErrors ++ duplicateErrors
+        , NE.head values )
+      where
+        lookupKey key' = case lookup key index of
+          Just values' ->
+            head . filter (elem key' . NE.map wordSenseKey . wordSenses) . rights
+            $ NE.toList values'
+          Nothing     -> error $ "Missing synset to key " ++ key
+        moreDuplicateErrors
+          = map (\value -> toSourceError (either lookupKey id value)
+                . DuplicateWordSense $ takeWhile (/= '\t') key)
+            $ NE.toList values
 
 wordSenseKey :: WNWord -> String
 wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _)
@@ -46,7 +65,9 @@ wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexica
 indexKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
 -- [ ] this is not really a sense key
 indexKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
-  intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, show lexicalId]
+  intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, pad $ show lexicalId]
+  where
+    pad x = replicate (2 - length x) '0' ++ x
 
 
 
@@ -158,25 +179,27 @@ checkWordSensePointersTargets index = traverse checkWordPointer
       where
         targetSenseKey = indexKey lexFileId wordForm lexicalId
 
-validateSynsets :: Index (NonEmpty (Synset Unvalidated))
+validateSynsets :: Index (Synset Unvalidated)
   -> NonEmpty (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
-validateSynsets indexWithDuplicates (firstSynset:|synsets) =
-  checkSynsetsOrder . checkSynsets $ checkIndexNoDuplicates indexWithDuplicates
+validateSynsets index (firstSynset:|synsets) =
+  checkSynsetsOrder checkedSynsets
   where
     checkSynsetsOrder (Success validatedSynsets)
       = bimap (NE.map toError) NE.fromList . validateSorted $ NE.toList validatedSynsets
     checkSynsetsOrder (Failure es) = Failure es
     toError unsortedSynsetSequences@(synset:|_)
       = toSourceError synset $ UnsortedSynsets (unsortedSynsetSequences :| [])
-    checkSynsets (Failure errors) = Failure errors
-    checkSynsets (Success index)
+    checkedSynsets
       = (:|)
       <$> checkSynset' firstSynset
       <*> foldr go (Success []) synsets
       where
         checkSynset' = checkSynset index
         go synset result = (:) <$> checkSynset' synset <*> result
+
+indexSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
+indexSynsets = concatMap (either (const []) (:[]) . snd) . toAscList
 
 ---
 

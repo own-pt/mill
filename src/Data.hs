@@ -2,11 +2,14 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
 
 module Data where
 
 import Data.Aeson (ToJSON(..), genericToEncoding, defaultOptions)
 import Data.Bifunctor (Bifunctor(..))
+import Data.Binary (Binary)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.RDF.ToRDF (ToObject(..))
@@ -21,7 +24,7 @@ import Text.Printf (printf)
 singleton :: a -> NonEmpty a
 singleton x = x :| []
 
-data WNObj = SynsetObj | WordObj deriving (Eq,Enum)
+data WNObj = SynsetObj | WordObj deriving (Binary,Eq,Enum,Generic)
 
 instance Show WNObj where
   show SynsetObj = "synset"
@@ -34,7 +37,7 @@ readWNObj input = case input of
   _        -> error . T.unpack
     $ T.intercalate " " ["Can't parse", input, "as WordNet object name (one of synset or word)"]
 
-data WNPOS = A | S | R | N | V deriving (Eq,Enum,Ord,Show)
+data WNPOS = A | S | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Show)
 
 readShortWNPOS :: Text -> WNPOS
 readShortWNPOS "n" = N
@@ -52,7 +55,9 @@ readLongWNPOS "adj"  = Just A
 readLongWNPOS "adv"  = Just R
 readLongWNPOS _      = Nothing
 
-newtype LexicographerFileId = LexicographerFileId (WNPOS, Text) deriving (Eq,Ord,Show)
+newtype LexicographerFileId = LexicographerFileId (WNPOS, Text)
+  deriving (Eq,Generic,Ord,Show)
+  deriving anyclass (Binary)
 
 synsetType :: WNPOS -> Int
 synsetType N = 1
@@ -83,18 +88,24 @@ instance ToObject LexicographerFileId where
     = pure . LiteralObject
     $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
 
-newtype WordSenseForm = WordSenseForm Text deriving (Show,Eq,Ord,Pretty,ToObject,Generic)
+newtype WordSenseForm = WordSenseForm Text
+  deriving (Eq,Ord,Generic,Show)
+  deriving newtype (Binary,Pretty, ToObject)
 
 instance ToJSON WordSenseForm where
     toEncoding = genericToEncoding defaultOptions
 
-newtype LexicalId = LexicalId Int deriving (Show,Eq,Ord,Pretty)
+newtype LexicalId = LexicalId Int
+  deriving (Eq,Generic,Ord,Show)
+  deriving newtype (Binary,Pretty)
 
 newtype WordSenseIdentifier =
   WordSenseIdentifier ( LexicographerFileId
                       , WordSenseForm
                       , LexicalId
-                      ) deriving (Eq,Ord,Show)
+                      )
+  deriving (Eq,Generic,Ord,Show)
+  deriving anyclass (Binary)
 
 makeWordSenseIdentifier :: LexicographerFileId -> WordSenseForm -> LexicalId
   -> WordSenseIdentifier
@@ -105,17 +116,19 @@ newtype SynsetIdentifier =
   SynsetIdentifier ( LexicographerFileId
                    , WordSenseForm
                    , LexicalId
-                   ) deriving (Show,Eq,Ord)
+                   )
+  deriving (Eq,Generic,Ord,Show)
+  deriving anyclass (Binary)
 
 type PointerName = Text
 type RelationName = Text
 data WordPointer = WordPointer PointerName WordSenseIdentifier
-  deriving (Show,Eq,Ord)
+  deriving (Binary,Eq,Generic,Ord,Show)
 data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
-  deriving (Show,Eq,Ord)
+  deriving (Binary,Eq,Generic,Ord,Show)
 type FrameIdentifier = Int
 data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
-  deriving (Eq,Ord,Show)
+  deriving (Binary,Eq,Generic,Ord,Show)
 
 senseKey :: Int -> Int -> Maybe SynsetRelation -> WNWord -> String
 senseKey lexFileNum synsetTypeNum maybeHeadRelation
@@ -133,10 +146,12 @@ senseKey lexFileNum synsetTypeNum maybeHeadRelation
         _           -> ("", "")
 
 
-newtype SourcePosition = SourcePosition (Int, Int) deriving (Show,Eq,Ord)
+newtype SourcePosition = SourcePosition (Int, Int)
+  deriving (Eq,Generic,Ord,Show)
+  deriving anyclass (Binary)
 
 -- synsets can be
-data Unvalidated
+data Unvalidated deriving (Binary,Generic)
 data Validated
 
 data Synset a = Synset
@@ -147,14 +162,14 @@ data Synset a = Synset
   , examples             :: [Text]
   , frames               :: [Int]
   , relations            :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
-  } deriving (Show,Eq)
+  } deriving (Binary,Eq,Generic,Show)
 
 instance Ord (Synset Validated) where
   Synset{wordSenses = (headWord:|_)} <= Synset{wordSenses = (headWord2:|_)}
     = headWord <= headWord2
 
 ---- validation
-data Validation e a = Failure e | Success a deriving (Show,Eq)
+data Validation e a = Failure e | Success a deriving (Binary,Eq,Generic,Show)
 
 instance Functor (Validation e) where
   fmap _ (Failure e) = Failure e
@@ -173,6 +188,10 @@ instance Semigroup e => Applicative (Validation e) where
   Failure e <*> Success _  = Failure e
   Failure e <*> Failure e' = Failure (e <> e')
 
+validate :: (a -> Validation e b) -> Validation e a -> Validation e b
+validate f (Success a) = f a
+validate _ (Failure e) = Failure e
+
 data WNError
   = ParseError String
   | DuplicateWordSense String
@@ -185,12 +204,12 @@ data WNError
   | UnsortedWordSenses (NonEmpty (NonEmpty Text))
   | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
-  deriving (Show)
+  deriving (Binary,Generic,Show)
 
 data SourceError
   = SourceError Text -- ^ name of source file
                 SourcePosition
-                WNError deriving (Show)
+                WNError deriving (Binary,Generic,Show)
 
 toSourceError :: Synset a -> WNError -> SourceError
 toSourceError Synset{sourcePosition, lexicographerFileId}
