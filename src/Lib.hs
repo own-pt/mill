@@ -5,9 +5,7 @@ module Lib
     , validateLexicographerFile
     , validateLexicographerFiles
     , lexicographerFilesJSON
-    , lexicographerFilesToTriples
     , readConfig
-    , lexicographerFilesInDirectoryToTriples
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
@@ -15,7 +13,7 @@ import Data ( Synset(..), Unvalidated, Validated
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
             , validate )
-import Export (synsetToTriples,synsetsToSynsetJSONs)
+import Export (synsetsToSynsetJSONs)
 import Parse (parseLexicographer)
 import Validate ( makeIndex, Index, indexSynsets
                 , validateSynsets, checkIndexNoDuplicates )
@@ -24,20 +22,14 @@ import Control.Monad (unless,(>>),mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFile)
-import Data.Binary.Builder (toLazyByteString)
 import Data.ByteString.Builder (hPutBuilder)
-import qualified Data.DList as DL
 import Data.Either (partitionEithers)
 import Data.List (intercalate,find)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.RDF.Encoder.NQuads (encodeRDFGraph)
-import Data.RDF.ToRDF (runRDFGen)
-import Data.RDF.Types (RDFGraph(..), IRI(..))
 import Data.Semigroup (sconcat)
-import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -230,32 +222,6 @@ readCachedIndex lexFilePath = do
   cachePath <- getCachePath
   let indexPath  = cachePath </> takeFileName lexFilePath <.> "index"
   decodeFile indexPath
-
-synsetsToTriples :: Map Text Text -> Map Text Text
-  -> IRI -> NonEmpty (Synset Validated) -> FilePath -> IO ()
-synsetsToTriples textToCanonicMap canonicToRDFMap baseIRI synsets outputFile =
-  encodeFile outputFile
-  . toLazyByteString
-  . encodeRDFGraph . RDFGraph Nothing $ DL.toList synsetsTriples
-  where
-    synsetsTriples = foldMap (\synset -> runRDFGen
-                               (synsetToTriples textToCanonicMap canonicToRDFMap synset)
-                               baseIRI)
-                     synsets
-
-lexicographerFilesToTriples :: IRI -> FilePath -> App ()
-lexicographerFilesToTriples baseIRI outputFile = do
-  Config{textToCanonicNames, canonicToRDFNames, lexFilePaths} <- ask
-  synsetsValid <- parseLexicographerFiles lexFilePaths
-  liftIO $ case synsetsValid of
-    Success synsets -> synsetsToTriples textToCanonicNames
-                                          canonicToRDFNames baseIRI synsets outputFile
-    Failure _ -> putStrLn "Errors in lexicographer files, please validate them before exporting."
-
-lexicographerFilesInDirectoryToTriples :: String -> FilePath -> App ()
-lexicographerFilesInDirectoryToTriples baseIriString =
-  lexicographerFilesToTriples (fromString baseIriString)
-  
 
 ---
 -- cache

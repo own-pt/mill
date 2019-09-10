@@ -5,9 +5,6 @@ import rdflib as r
 from rdflib import Graph, Namespace
 import click
 
-# missing:
-# - adjective sattellites
-
 wn30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
 
 

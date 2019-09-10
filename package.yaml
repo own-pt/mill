@@ -25,6 +25,7 @@ default-extensions:
 - NamedFieldPuns
 - DuplicateRecordFields
 - TupleSections
+- RecordWildCards
 
 dependencies:
 - aeson == 1.4.*

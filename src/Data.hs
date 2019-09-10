@@ -7,13 +7,11 @@
 
 module Data where
 
-import Data.Aeson (ToJSON(..), genericToEncoding, defaultOptions)
+import Data.Aeson ( ToJSON(..), genericToEncoding, defaultOptions, Value(..) )
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (Binary)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
-import Data.RDF.ToRDF (ToObject(..))
-import Data.RDF.Types (Object(..),Literal(..),LiteralType(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest
@@ -37,7 +35,7 @@ readWNObj input = case input of
   _        -> error . T.unpack
     $ T.intercalate " " ["Can't parse", input, "as WordNet object name (one of synset or word)"]
 
-data WNPOS = A | S | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Show)
+data WNPOS = A | S | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Show,ToJSON)
 
 readShortWNPOS :: Text -> WNPOS
 readShortWNPOS "n" = N
@@ -57,7 +55,7 @@ readLongWNPOS _      = Nothing
 
 newtype LexicographerFileId = LexicographerFileId (WNPOS, Text)
   deriving (Eq,Generic,Ord,Show)
-  deriving anyclass (Binary)
+  deriving anyclass (Binary,ToJSON)
 
 synsetType :: WNPOS -> Int
 synsetType N = 1
@@ -83,21 +81,24 @@ lexicographerFileIdFromText = go . T.breakOn "."
                                         , T.tail name) -- remove '.'
     go (pos, name) = wrap <$> readLongWNPOS pos <*> Just name
 
-instance ToObject LexicographerFileId where
-  object lexicographerFileId
-    = pure . LiteralObject
-    $ Literal (lexicographerFileIdToText lexicographerFileId) LiteralUntyped
-
 newtype WordSenseForm = WordSenseForm Text
   deriving (Eq,Ord,Generic,Show)
-  deriving newtype (Binary,Pretty, ToObject)
+  deriving newtype (Binary,Pretty)
 
 instance ToJSON WordSenseForm where
     toEncoding = genericToEncoding defaultOptions
 
 newtype LexicalId = LexicalId Int
   deriving (Eq,Generic,Ord,Show)
-  deriving newtype (Binary,Pretty)
+  deriving newtype (Binary,Pretty,ToJSON)
+
+tshow :: Show a => a -> Text
+tshow = T.pack . show
+
+wnIdentifierToJSON :: ( LexicographerFileId, WordSenseForm , LexicalId) -> Value
+wnIdentifierToJSON (lexFileId, WordSenseForm wordSenseForm, LexicalId lexId)
+  = String
+  $ T.concat [lexicographerFileIdToText lexFileId, ":", wordSenseForm, ":", tshow lexId]
 
 newtype WordSenseIdentifier =
   WordSenseIdentifier ( LexicographerFileId
@@ -106,6 +107,9 @@ newtype WordSenseIdentifier =
                       )
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary)
+
+instance ToJSON WordSenseIdentifier where
+  toJSON (WordSenseIdentifier wnIdentifier) = wnIdentifierToJSON wnIdentifier
 
 makeWordSenseIdentifier :: LexicographerFileId -> WordSenseForm -> LexicalId
   -> WordSenseIdentifier
@@ -120,12 +124,15 @@ newtype SynsetIdentifier =
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary)
 
+instance ToJSON SynsetIdentifier where
+  toJSON (SynsetIdentifier wnIdentifier) = wnIdentifierToJSON wnIdentifier
+
 type PointerName = Text
 type RelationName = Text
 data WordPointer = WordPointer PointerName WordSenseIdentifier
-  deriving (Binary,Eq,Generic,Ord,Show)
+  deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
 data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
-  deriving (Binary,Eq,Generic,Ord,Show)
+  deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
 type FrameIdentifier = Int
 data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
   deriving (Binary,Eq,Generic,Ord,Show)
@@ -148,7 +155,7 @@ senseKey lexFileNum synsetTypeNum maybeHeadRelation
 
 newtype SourcePosition = SourcePosition (Int, Int)
   deriving (Eq,Generic,Ord,Show)
-  deriving anyclass (Binary)
+  deriving anyclass (Binary,ToJSON)
 
 -- synsets can be
 data Unvalidated deriving (Binary,Generic)
