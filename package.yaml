@@ -25,6 +25,7 @@ default-extensions:
 - NamedFieldPuns
 - DuplicateRecordFields
 - TupleSections
+- RecordWildCards
 
 dependencies:
 - aeson == 1.4.*
@@ -33,7 +34,6 @@ dependencies:
 - binary == 0.8.*
 - containers == 0.6.*
 - directory == 1.*
-- dlist == 0.8.*
 - filepath == 1.*
 - list-tries == 0.6.*
 - megaparsec == 7.*
@@ -41,7 +41,6 @@ dependencies:
 - optparse-applicative >= 0.14 && < 1
 - parser-combinators == 1.*
 - prettyprinter == 1.*
-- rdf == 0.1.*
 - shake == 0.17.*
 - text == 1.2.*
 - transformers == 0.5.*

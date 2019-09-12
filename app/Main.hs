@@ -3,21 +3,16 @@ module Main where
 import Lib ( validateLexicographerFile
            , validateLexicographerFiles
            , lexicographerFilesJSON
-           , lexicographerFilesInDirectoryToTriples
            , readConfig )
 
 import Control.Monad.Reader (ReaderT(..))
 import Options.Applicative ( customExecParser, prefs, ParserInfo, Parser, showHelpOnError
                            , command, subparser, info, helper, fullDesc, progDesc
-                           , argument, str, help, metavar, header, long, flag'
-                           , (<|>) )
+                           , argument, str, help, metavar, header )
 import System.Directory (doesDirectoryExist)
 import System.FilePath (takeDirectory)
 
 data Command = Validate FilePath
-  | ExportRDFCommand String   -- baseIRI
-                     FilePath -- lexicographer directory
-                     FilePath -- output file
   | ExportJSONCommand FilePath FilePath
              deriving Show
 
@@ -45,19 +40,12 @@ parseValidateCommand = Validate <$> validateParser
       (metavar "PATH" <> help "Validates one lexicographer file in case PATH is a file, else validates all lexicographer files in directory. Assumes lexnames.tsv is in the same PATH")
 
 parseExportCommand :: Parser Command
-parseExportCommand = rdfCommand <|> jsonCommand
+parseExportCommand = jsonCommand
   where
-    rdfFlag :: Parser ()
-    rdfFlag = flag' () (long "rdf" <> help "Export to RDF")
-    rdfCommand = rdfFlag
-               *> (ExportRDFCommand <$> baseIRI <*> configDir <*> outputFile)
-      where
-        baseIRI = argument str
-          (metavar "IRI" <> help "Base IRI for RDF nodes")
-    jsonFlag :: Parser ()
-    jsonFlag = flag' () (long "json" <> help "Export to sensetion's JSON format")
-    jsonCommand = jsonFlag
-                *> (ExportJSONCommand <$> configDir <*> outputFile)
+    -- jsonFlag :: Parser ()
+    -- jsonFlag = flag' () (long "json" <> help "Export to sensetion's JSON format")
+    jsonCommand = --jsonFlag *>
+      ExportJSONCommand <$> configDir <*> outputFile
     configDir = argument str
       (metavar "DIR" <> help "Directory where configuration files in")
     outputFile = argument str
@@ -83,9 +71,6 @@ main = do
                   then validateLexicographerFiles
                   else validateLexicographerFile filepath)
         config
-    (ExportRDFCommand baseIri lexDirectory outputFile) -> do
-      config <- readConfig lexDirectory
-      runReaderT (lexicographerFilesInDirectoryToTriples baseIri outputFile) config
     (ExportJSONCommand configDir outputFile) -> do
       config <- readConfig configDir
       runReaderT (lexicographerFilesJSON outputFile) config

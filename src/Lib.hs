@@ -5,9 +5,7 @@ module Lib
     , validateLexicographerFile
     , validateLexicographerFiles
     , lexicographerFilesJSON
-    , lexicographerFilesToTriples
     , readConfig
-    , lexicographerFilesInDirectoryToTriples
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
@@ -15,7 +13,7 @@ import Data ( Synset(..), Unvalidated, Validated
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
             , validate )
-import Export (synsetToTriples,synsetsToSynsetJSONs)
+import Export (synsetsToSynsetJSONs)
 import Parse (parseLexicographer)
 import Validate ( makeIndex, Index, indexSynsets
                 , validateSynsets, checkIndexNoDuplicates )
@@ -24,20 +22,14 @@ import Control.Monad (unless,(>>),mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFile)
-import Data.Binary.Builder (toLazyByteString)
 import Data.ByteString.Builder (hPutBuilder)
-import qualified Data.DList as DL
 import Data.Either (partitionEithers)
 import Data.List (intercalate,find)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.RDF.Encoder.NQuads (encodeRDFGraph)
-import Data.RDF.ToRDF (runRDFGen)
-import Data.RDF.Types (RDFGraph(..), IRI(..))
 import Data.Semigroup (sconcat)
-import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -60,8 +52,6 @@ data Config = Config
     lexnamesToId       :: Map Text Int
   -- | maps relation names in text files to their canonical names
   , textToCanonicNames :: Map Text Text
-  -- | maps canonical relation names to their RDF names
-  , canonicToRDFNames  :: Map Text Text
   -- | maps canonic relation names to their possible domains
   , canonicToDomain    :: Map Text (NonEmpty WNObj, NonEmpty WNPOS)
   -- | contains the filepaths to the files in the WordNet
@@ -92,11 +82,10 @@ readConfig configurationDir' = do
       lexnamesToId       <- readTSV lexNamesInput lexnamesReader
       relationsInput     <- TIO.readFile $ configurationDir </> "relations.tsv"
       textToCanonicNames <- readTSV relationsInput textToCanonicNamesReader
-      canonicToRDFNames  <- readTSV relationsInput canonicToRDFNamesReader
       canonicToDomain    <- readTSV relationsInput canonicToDomainReader
       let lexFilePaths = lexFilePaths' lexnamesToId
       return $ Config {lexnamesToId, textToCanonicNames
-                      , canonicToRDFNames, lexFilePaths, canonicToDomain
+                      , lexFilePaths, canonicToDomain
                       }
         where
           lexFilePaths' lexNamesMap =
@@ -114,8 +103,6 @@ readConfig configurationDir' = do
           textToCanonicNamesReader [_,_,"_",_,_,_,_]      = Right []
           textToCanonicNamesReader [canonicName,_,textName,_,_,_,_] = Right [(textName, canonicName)]
           textToCanonicNamesReader _ = Left "Wrong number of fields in relations.tsv"
-          canonicToRDFNamesReader  [canonicName,_,_,rdfName,_,_,_] = Right [(canonicName, rdfName)]
-          canonicToRDFNamesReader _ = Left "Wrong number of fields in relations.tsv"
           canonicToDomainReader [canonicName,_,_,_,pos,domain,_] =
             Right [(canonicName, ( readListField readWNObj domain
                                  , readListField readShortWNPOS pos))]
@@ -146,10 +133,10 @@ parseLexicographerFiles filePaths = do
 
 lexicographerFilesJSON :: FilePath -> App ()
 lexicographerFilesJSON outputFile = do
-  Config{lexFilePaths, lexnamesToId} <- ask
+  Config{lexFilePaths, lexnamesToId, textToCanonicNames} <- ask
   validationResults <- parseLexicographerFiles lexFilePaths
   case validationResults of
-    Success synsets -> let jsonBuilder = synsetsToSynsetJSONs lexnamesToId synsets
+    Success synsets -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
                        in liftIO
                           $ withFile outputFile WriteMode (`write` jsonBuilder) 
     Failure errors -> liftIO $ prettyPrintList errors
@@ -230,32 +217,6 @@ readCachedIndex lexFilePath = do
   cachePath <- getCachePath
   let indexPath  = cachePath </> takeFileName lexFilePath <.> "index"
   decodeFile indexPath
-
-synsetsToTriples :: Map Text Text -> Map Text Text
-  -> IRI -> NonEmpty (Synset Validated) -> FilePath -> IO ()
-synsetsToTriples textToCanonicMap canonicToRDFMap baseIRI synsets outputFile =
-  encodeFile outputFile
-  . toLazyByteString
-  . encodeRDFGraph . RDFGraph Nothing $ DL.toList synsetsTriples
-  where
-    synsetsTriples = foldMap (\synset -> runRDFGen
-                               (synsetToTriples textToCanonicMap canonicToRDFMap synset)
-                               baseIRI)
-                     synsets
-
-lexicographerFilesToTriples :: IRI -> FilePath -> App ()
-lexicographerFilesToTriples baseIRI outputFile = do
-  Config{textToCanonicNames, canonicToRDFNames, lexFilePaths} <- ask
-  synsetsValid <- parseLexicographerFiles lexFilePaths
-  liftIO $ case synsetsValid of
-    Success synsets -> synsetsToTriples textToCanonicNames
-                                          canonicToRDFNames baseIRI synsets outputFile
-    Failure _ -> putStrLn "Errors in lexicographer files, please validate them before exporting."
-
-lexicographerFilesInDirectoryToTriples :: String -> FilePath -> App ()
-lexicographerFilesInDirectoryToTriples baseIriString =
-  lexicographerFilesToTriples (fromString baseIriString)
-  
 
 ---
 -- cache
