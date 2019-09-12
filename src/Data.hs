@@ -7,11 +7,13 @@
 
 module Data where
 
-import Data.Aeson ( ToJSON(..), genericToEncoding, defaultOptions, Value(..) )
+import Data.Aeson ( ToJSON(..), Value(..) )
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (Binary)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as M
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest
@@ -34,6 +36,9 @@ readWNObj input = case input of
   "word"   -> WordObj
   _        -> error . T.unpack
     $ T.intercalate " " ["Can't parse", input, "as WordNet object name (one of synset or word)"]
+
+unsafeLookup :: Ord k => String -> k -> Map k a -> a
+unsafeLookup errorMessage = M.findWithDefault $ error errorMessage
 
 data WNPOS = A | S | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Show,ToJSON)
 
@@ -83,10 +88,7 @@ lexicographerFileIdFromText = go . T.breakOn "."
 
 newtype WordSenseForm = WordSenseForm Text
   deriving (Eq,Ord,Generic,Show)
-  deriving newtype (Binary,Pretty)
-
-instance ToJSON WordSenseForm where
-    toEncoding = genericToEncoding defaultOptions
+  deriving newtype (Binary,Pretty,ToJSON)
 
 newtype LexicalId = LexicalId Int
   deriving (Eq,Generic,Ord,Show)
@@ -96,9 +98,8 @@ tshow :: Show a => a -> Text
 tshow = T.pack . show
 
 wnIdentifierToJSON :: ( LexicographerFileId, WordSenseForm , LexicalId) -> Value
-wnIdentifierToJSON (lexFileId, WordSenseForm wordSenseForm, LexicalId lexId)
-  = String
-  $ T.concat [lexicographerFileIdToText lexFileId, ":", wordSenseForm, ":", tshow lexId]
+wnIdentifierToJSON (LexicographerFileId (wnPOS, lexname), WordSenseForm wordSenseForm, LexicalId lexId)
+  = toJSON (wnPOS, lexname, wordSenseForm, lexId)
 
 newtype WordSenseIdentifier =
   WordSenseIdentifier ( LexicographerFileId

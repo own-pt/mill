@@ -2,50 +2,55 @@ module Export where
 
 import Data ( LexicographerFileId(..)
             , WordSenseIdentifier(..), Synset(..), Validated
-            , SynsetRelation(..), WNWord(..)
+            , SynsetRelation(..), WNWord(..), WordPointer(..)
             , lexicographerFileIdToText, senseKey, synsetType
-            , WNPOS(..) )
+            , WNPOS(..), unsafeLookup )
 ---
 import Data.Aeson ( ToJSON(..), fromEncoding, Value
                   , object, (.=) )
 import Data.ByteString.Builder (Builder,charUtf8)
-import Data.Char (toLower)
 import Data.List (find)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
-import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 
 ---
 -- JSON/aeson
-synsetToJSON :: Map Text Int -> Synset Validated -> Value
-synsetToJSON lexNamesToLexNum
-  Synset{wordSenses = wordSenses@(WNWord (WordSenseIdentifier (lexFileId@(LexicographerFileId (wnPOS, lexname)), headWordForm, headLexId)) _ _:|_), ..}
+synsetToJSON :: Map Text Text -> Map Text Int -> Synset Validated -> Value
+synsetToJSON textToCanonicNames lexNamesToLexNum
+  Synset{wordSenses = wordSenses@(WNWord headWordId@(WordSenseIdentifier (lexFileId@(LexicographerFileId (wnPOS, _)), _, _)) _ _:|_), ..}
   = object
-  [ "id"         .= (toLower . head $ show wnPOS, lexname, headWordForm, headLexId)
+  [ "id"         .= headWordId
   , "wordsenses" .= NE.map toWordSense wordSenses
   , "definition" .= definition
   , "examples"   .= examples
   , "frames"     .= frames
-  , "relations"  .= relations
+  , "relations"  .= map (\(SynsetRelation name targetIdentifier) -> toRelation name targetIdentifier) relations
   , "position"   .= sourcePosition
   ]
   where
-    toWordSense wordSense@(WNWord (WordSenseIdentifier (_,wordForm,lexId)) wordFrames pointers)
-      = (wordForm, lexId, wordFrames, pointers, senseKey lexFileNum (synsetType wnPOS) maybeHeadSynset wordSense)
+    toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "id" .= wnIdentifier]
+    missingRelation name = "No relation with name " ++ show name ++ " found in relation.tsv"
+    toWordSense wordSense@(WNWord (WordSenseIdentifier (_, lexForm, lexId)) wordFrames pointers)
+      = object
+      [ "lexicalForm" .= lexForm
+      , "lexicalId" .= lexId
+      , "frames" .= wordFrames
+      , "pointers" .= map (\(WordPointer name targetIdentifier) -> toRelation name targetIdentifier) pointers
+      , "senseKey" .= senseKey lexFileNum (synsetType wnPOS) maybeHeadSynset wordSense
+      ]
     lexfileName  = lexicographerFileIdToText lexFileId
-    lexFileNum = fromMaybe (error $ "No lexfile with name "
-                            ++ show lexfileName ++ "found in lexnames.tsv")
-                 $ M.lookup lexfileName lexNamesToLexNum
+    lexFileNum = unsafeLookup ("No lexfile with name "
+                               ++ show lexfileName ++ "found in lexnames.tsv")
+                 lexfileName lexNamesToLexNum
     isHeadRelation (SynsetRelation "sim" _) = True
     isHeadRelation _ = False
     maybeHeadSynset = case wnPOS of
       S -> find isHeadRelation relations
       _ -> Nothing
 
-synsetsToSynsetJSONs :: Map Text Int -> NonEmpty (Synset Validated) -> Builder
-synsetsToSynsetJSONs lexNamesToLexNum synsets
+synsetsToSynsetJSONs :: Map Text Text -> Map Text Int -> NonEmpty (Synset Validated) -> Builder
+synsetsToSynsetJSONs textToCanonicNames lexNamesToLexNum synsets
   = mconcat . NE.toList . NE.intersperse (charUtf8 '\n')
-  $ NE.map (fromEncoding . toEncoding . synsetToJSON lexNamesToLexNum) synsets
+  $ NE.map (fromEncoding . toEncoding . synsetToJSON textToCanonicNames lexNamesToLexNum) synsets

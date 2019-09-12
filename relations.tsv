@@ -1,34 +1,34 @@
 name	lexicographer file	text file	rdf	pos	domain	description
-antonymOf	!	ant	wn30/own-pt/schema/antonymOf	n,v,a,r	word	Antonym
-memberHolonymOf	#m	hm	wn30/own-pt/schema/memberHolonymOf	n	synset	Member holonym
-partHolonymOf	#p	hp	wn30/own-pt/schema/partHolonymOf	n	synset	Part holonym
-substanceHolonymOf	#s	hs	wn30/own-pt/schema/substanceHolonymOf	n	synset	Substance holonym
-sameVerbGroupAs	$	vg	wn30/own-pt/schema/sameVerbGroupAs	v	synset,word	Verb Group
-memberMeronymOf	%m	mm	wn30/own-pt/schema/memberMeronymOf	n	synset	Member meronym
-partMeronymOf	%p	mp	wn30/own-pt/schema/partMeronymOf	n	synset	Part meronym
-substanceMeronymOf	%s	ms	wn30/own-pt/schema/substanceMeronymOf	n	synset	Substance meronym
-similarTo	&	sim	wn30/own-pt/schema/similarTo	a,s	synset	Similar to
-entails	*	entail	wn30/own-pt/schema/entails	v	synset	entailment
-derivationallyRelated	+	drf	wn30/own-pt/schema/derivationallyRelated	n,v,a,s	synset,word	Derivationally related form
-classifiedByTopic	-c	mt	wn30/own-pt/schema/classifiedByTopic	n,v,a,r,s	synset,word	Member of this domain - TOPIC
-classifiedByRegion	-r	mr	wn30/own-pt/schema/classifiedByRegion	n,v,a,r,s	synset,word	Member of this domain - REGION
-classifiedByUsage	-u	mu	wn30/own-pt/schema/classifiedByUsage	n,v,a,r,s	synset,word	Member of this domain - USAGE
-classifiesByTopic	;c	dt	wn30/own-pt/schema/classifiesByTopic	n	synset,word	Domain of synset - TOPIC
-classifiesByRegion	;r	dr	wn30/own-pt/schema/classifiesByRegion	n	synset,word	Domain of synset - REGION
-classifiesByUsage	;u	du	wn30/own-pt/schema/classifiesByUsage	n	synset,word	Domain of synset - USAGE
-participleOf	<	pv	wn30/own-pt/schema/participleOf	a	word	Participle of verb
-attribute	=	attr	wn30/own-pt/schema/attribute	n,a	synset	Attribute
-causes	>	cause	wn30/own-pt/schema/causes	v	synset	Cause
-hypernymOf	@	hyper	wn30/own-pt/schema/hypernymOf	n,v	synset	Hypernym
-instanceOf	@i	ihyper	wn30/own-pt/schema/instanceOf	n	synset	Instance Hypernym (9/11 is a terrorist attack)
-pertainsTo	\	pe	wn30/own-pt/schema/pertainsTo	a,r	word	Pertainym pertains to noun/adjective
-seeAlso	^	see	wn30/own-pt/schema/seeAlso	v,a	synset,word	Also see
-hyponymOf	~	hypo	wn30/own-pt/schema/hyponymOf	n,v	synset	Hyponym
-hasInstance	~i	ihypo	wn30/own-pt/schema/hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)
-lexicographerFile	_	_	wn30/own-pt/schema/lexicographerFile	n,v,a,r,s	synset	lexicographer file relation
-definition	_	d	wn30/own-pt/schema/definition	n,v,a,r,s	synset	definition relation
-example	_	e	wn30/own-pt/schema/example	n,v,a,r,s	synset	example relation
-containsWordSense	_	w	wn30/own-pt/schema/containsWordSense	n,v,a,r	synset	contains word sense relation
-frame	_	fs	wn30/own-pt/schema/frame	v	synset,word	frame relation
-lexicalForm	_	_	wn30/own-pt/schema/lexicalForm	n,v,a,r,s	synset	lexicographer file relation
-syntacticMarker	_	marker	wn30/own-pt/schema/syntacticMarker	a	word	   marker
+antonymOf	!	ant	antonymOf	n,v,a,r	word	Antonym
+memberHolonymOf	#m	hm	memberHolonymOf	n	synset	Member holonym
+partHolonymOf	#p	hp	partHolonymOf	n	synset	Part holonym
+substanceHolonymOf	#s	hs	substanceHolonymOf	n	synset	Substance holonym
+sameVerbGroupAs	$	vg	sameVerbGroupAs	v	synset,word	Verb Group
+memberMeronymOf	%m	mm	memberMeronymOf	n	synset	Member meronym
+partMeronymOf	%p	mp	partMeronymOf	n	synset	Part meronym
+substanceMeronymOf	%s	ms	substanceMeronymOf	n	synset	Substance meronym
+similarTo	&	sim	similarTo	a,s	synset	Similar to
+entails	*	entail	entails	v	synset	entailment
+derivationallyRelated	+	drf	derivationallyRelated	n,v,a,s,r	synset,word	Derivationally related form
+classifiedByTopic	-c	mt	classifiedByTopic	n,v,a,r,s	synset,word	Member of this domain - TOPIC
+classifiedByRegion	-r	mr	classifiedByRegion	n,v,a,r,s	synset,word	Member of this domain - REGION
+classifiedByUsage	-u	mu	classifiedByUsage	n,v,a,r,s	synset,word	Member of this domain - USAGE
+classifiesByTopic	;c	dt	classifiesByTopic	n	synset,word	Domain of synset - TOPIC
+classifiesByRegion	;r	dr	classifiesByRegion	n	synset,word	Domain of synset - REGION
+classifiesByUsage	;u	du	classifiesByUsage	n	synset,word	Domain of synset - USAGE
+participleOf	<	pv	participleOf	a	word	Participle of verb
+attribute	=	attr	attribute	n,a	synset	Attribute
+causes	>	cause	causes	v	synset	Cause
+hypernymOf	@	hyper	hypernymOf	n,v	synset	Hypernym
+instanceOf	@i	ihyper	instanceOf	n	synset	Instance Hypernym (9/11 is a terrorist attack)
+pertainsTo	\	pe	pertainsTo	a,r	word	Pertainym pertains to noun/adjective
+seeAlso	^	see	seeAlso	v,a	synset,word	Also see
+hyponymOf	~	hypo	hyponymOf	n,v	synset	Hyponym
+hasInstance	~i	ihypo	hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)
+lexicographerFile	_	_	lexicographerFile	n,v,a,r,s	synset	lexicographer file relation
+definition	_	d	definition	n,v,a,r,s	synset	definition relation
+example	_	e	example	n,v,a,r,s	synset	example relation
+containsWordSense	_	w	containsWordSense	n,v,a,r	synset	contains word sense relation
+frame	_	fs	frame	v	synset,word	frame relation
+lexicalForm	_	_	lexicalForm	n,v,a,r,s	synset	lexicographer file relation
+syntacticMarker	_	marker	syntacticMarker	a	word	   marker

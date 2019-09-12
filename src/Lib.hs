@@ -52,8 +52,6 @@ data Config = Config
     lexnamesToId       :: Map Text Int
   -- | maps relation names in text files to their canonical names
   , textToCanonicNames :: Map Text Text
-  -- | maps canonical relation names to their RDF names
-  , canonicToRDFNames  :: Map Text Text
   -- | maps canonic relation names to their possible domains
   , canonicToDomain    :: Map Text (NonEmpty WNObj, NonEmpty WNPOS)
   -- | contains the filepaths to the files in the WordNet
@@ -84,11 +82,10 @@ readConfig configurationDir' = do
       lexnamesToId       <- readTSV lexNamesInput lexnamesReader
       relationsInput     <- TIO.readFile $ configurationDir </> "relations.tsv"
       textToCanonicNames <- readTSV relationsInput textToCanonicNamesReader
-      canonicToRDFNames  <- readTSV relationsInput canonicToRDFNamesReader
       canonicToDomain    <- readTSV relationsInput canonicToDomainReader
       let lexFilePaths = lexFilePaths' lexnamesToId
       return $ Config {lexnamesToId, textToCanonicNames
-                      , canonicToRDFNames, lexFilePaths, canonicToDomain
+                      , lexFilePaths, canonicToDomain
                       }
         where
           lexFilePaths' lexNamesMap =
@@ -106,8 +103,6 @@ readConfig configurationDir' = do
           textToCanonicNamesReader [_,_,"_",_,_,_,_]      = Right []
           textToCanonicNamesReader [canonicName,_,textName,_,_,_,_] = Right [(textName, canonicName)]
           textToCanonicNamesReader _ = Left "Wrong number of fields in relations.tsv"
-          canonicToRDFNamesReader  [canonicName,_,_,rdfName,_,_,_] = Right [(canonicName, rdfName)]
-          canonicToRDFNamesReader _ = Left "Wrong number of fields in relations.tsv"
           canonicToDomainReader [canonicName,_,_,_,pos,domain,_] =
             Right [(canonicName, ( readListField readWNObj domain
                                  , readListField readShortWNPOS pos))]
@@ -138,10 +133,10 @@ parseLexicographerFiles filePaths = do
 
 lexicographerFilesJSON :: FilePath -> App ()
 lexicographerFilesJSON outputFile = do
-  Config{lexFilePaths, lexnamesToId} <- ask
+  Config{lexFilePaths, lexnamesToId, textToCanonicNames} <- ask
   validationResults <- parseLexicographerFiles lexFilePaths
   case validationResults of
-    Success synsets -> let jsonBuilder = synsetsToSynsetJSONs lexnamesToId synsets
+    Success synsets -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
                        in liftIO
                           $ withFile outputFile WriteMode (`write` jsonBuilder) 
     Failure errors -> liftIO $ prettyPrintList errors
