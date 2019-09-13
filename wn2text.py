@@ -132,7 +132,7 @@ def word_sense_id(graph, lexicographer_file, word_sense):
     if None not in (word, word_form, lexical_id, in_synset, in_lexfile):
         return (in_lexfile, word_form, int(lexical_id))
     else:
-        raise "Error: missing wordsense information"
+        raise LookupError("Error: missing wordsense information for wordsense {}.\n word_form: {}, lexical_id: {}, in_synset: {}, in_lexfile: {}".format(word_sense, word_form, lexical_id, in_synset, in_lexfile))
 
 
 def print_word_sense_id(wordsense_id, lexicographer_file=None):
