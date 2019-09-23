@@ -3,8 +3,11 @@ module Validate
   ( validateSynsets
   , checkIndexNoDuplicates
   , indexSynsets
+  , lookupIndex
   , makeIndex
   , Index
+  , indexKey
+  , wordSenseKey
   ) where
 
 import Data
@@ -16,7 +19,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
-import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toAscList,mapAccumWithKey',lookup,)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toAscList,mapAccumWithKey',lookup)
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
@@ -203,3 +206,9 @@ indexSynsets = concatMap (either (const []) (:[]) . snd) . toAscList
 
 ---
 
+lookupIndex :: String -> Index (Synset a) -> Maybe (Synset a)
+lookupIndex key index =
+  case lookup key index of
+    Just (Left headKey) -> lookupIndex headKey index
+    Just (Right synset) -> Just synset
+    Nothing -> Nothing
