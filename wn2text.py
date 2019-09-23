@@ -19,7 +19,7 @@ def cli():
 
 @cli.command()
 @click.argument('rdf_input',
-                type=click.File(mode="r"), required=True)
+                type=click.File(mode="rb"), required=True)
 @click.argument('config_dir',
                 type=click.Path(exists=True, file_okay=False, resolve_path=True), required=True)
 @click.argument('output_dir'
@@ -110,7 +110,7 @@ def sort_synsets(graph, synsets):
 
 def print_lexfile(graph, lexicographer_file, synset_relations,
                   word_relations, frames_to_id, output_dir):
-    with open(os.path.join(output_dir, lexicographer_file), 'w') as output_stream:
+    with open(os.path.join(output_dir, lexicographer_file), 'w+') as output_stream:
         write = lambda data, *args, **kwargs: print(data, file=output_stream,
                                                     *args, **kwargs)
         pos, lexname = lexicographer_file.split(".")

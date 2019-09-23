@@ -66,7 +66,7 @@ main = do
   case commandToRun of
     Validate filepath -> do
       isDirectory <- doesDirectoryExist filepath
-      config <- readConfig $ takeDirectory filepath
+      config <- readConfig $ if isDirectory then filepath else takeDirectory filepath
       runReaderT (if isDirectory
                   then validateLexicographerFiles
                   else validateLexicographerFile filepath)

@@ -40,9 +40,10 @@ import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
 import Development.Shake.FilePath ((<.>), (-<.>), takeFileName)
 import System.Directory ( canonicalizePath, doesDirectoryExist
-                        , getXdgDirectory, XdgDirectory(..), doesDirectoryExist )
-import System.FilePath ((</>), normalise,equalFilePath)
+                        , doesDirectoryExist )
+import System.FilePath ((</>), normalise, equalFilePath, takeDirectory, splitFileName)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
+--import Debug.Trace
 
 -- | This datastructure contains the information found in the
 -- configuration files (currently only lexnames.tsv and relations.tsv
@@ -150,9 +151,6 @@ lexicographerFilesJSON outputFile = do
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)
 
-getCachePath :: IO FilePath
-getCachePath = getXdgDirectory XdgCache "mill"
-
 validateLexicographerFile :: FilePath -> App ()
 validateLexicographerFile filePath = do
   normalFilePath   <- liftIO $ canonicalizePath filePath
@@ -214,16 +212,16 @@ validateLexicographerFiles = do
 readCachedIndex :: FilePath
   -> IO (SourceValidation (Index (Synset Unvalidated)))
 readCachedIndex lexFilePath = do
-  cachePath <- getCachePath
-  let indexPath  = cachePath </> takeFileName lexFilePath <.> "index"
+  let (directoryPath, filePath) = splitFileName lexFilePath
+      indexPath = directoryPath </> ".cache" </> filePath <.> "index"
   decodeFile indexPath
 
 ---
 -- cache
 build :: App ()
 build = do
-  config@Config{lexFilePaths} <- ask
-  cachePath <- liftIO getCachePath
+  config@Config{lexFilePaths = lexFilePaths@(aLexFilePath:|_)} <- ask
+  let cachePath = takeDirectory aLexFilePath </> ".cache"
   liftIO . shake shakeOptions{ shakeFiles=cachePath, shakeThreads=0 }
     $ do
     want . map (flip (<.>) "index" . (</>) cachePath . takeFileName)

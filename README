@@ -67,6 +67,6 @@ checking if the synsets are sorted).
 
 
 * Why the name mill?
-=mill= aims to fulfill the same role that =grind= once did. It's been
+=mill= aims to fulfill the same role that [[https://wordnet.princeton.edu/documentation/grind1wn][grind]] once did. It's been
 named =mill= because it's a synonym of =grind= and is also a prefix of
 [[https://en.wikipedia.org/wiki/George_Armitage_Miller][Miller]].
