@@ -137,7 +137,7 @@ showDBSynset :: Map String Int -> DBSynset -> Text
 showDBSynset offsetMap DBSynset{ synsetId, lexicographerFileNum, pos, wordSenses, frames, relations, gloss}
   = T.unwords
   [ offsetDoc
-  , tshow lexicographerFileNum
+  , padNum 2 lexicographerFileNum
   , showPos pos
   , wordCount
   , T.unwords . NE.toList $ NE.map synsetWord wordSenses
@@ -146,7 +146,7 @@ showDBSynset offsetMap DBSynset{ synsetId, lexicographerFileNum, pos, wordSenses
   , "|", gloss]
   where
     pointerCount = padNum 3 $ length relations
-    wordCount = T.pack $ (showHex $ NE.length wordSenses) ""
+    wordCount = paddedHex 2 $ NE.length wordSenses
     showPos N = "n"
     showPos V = "v"
     showPos S = "s"
@@ -163,13 +163,16 @@ showDBSynset offsetMap DBSynset{ synsetId, lexicographerFileNum, pos, wordSenses
                   , paddedHex 2 sourceNum <> paddedHex 2 targetNum ]
     synsetFrame (frameNum, wordNum) = padNum 2 frameNum <> " " <> paddedHex 2 wordNum
 
-calculateOffsets :: Int -> Map Text Text -> Map Text Int -> Index (Synset a) -> NonEmpty (Synset Validated)
+newline :: Text
+newline = "\n"
+
+calculateOffsets :: Int -> Map String Int -> Map Text Text -> Map Text Int -> Index (Synset a) -> NonEmpty (Synset Validated)
   -> (Map String Int, NonEmpty DBSynset)
-calculateOffsets startOffset relationsMap lexicographerMap index synsets
-  = (\((offsetMap, _), dbSynsets) -> (offsetMap, dbSynsets)) $ mapAccumL go (M.empty, startOffset) synsets
+calculateOffsets startOffset startOffsetMap relationsMap lexicographerMap index synsets
+  = (\((offsetMap, _), dbSynsets) -> (offsetMap, dbSynsets)) $ mapAccumL go (startOffsetMap, startOffset) synsets
   where
     getBytesize = B.length . encodeUtf8
-    newlineSize = getBytesize "\n"
+    newlineSize = getBytesize newline
     go :: (Map String Int, Int) -> Synset Validated -> ((Map String Int, Int), DBSynset)
     go (offsetMap, offset) synset =
       let dbSynset@DBSynset{synsetId = (lexFile, lexForm, lexId)} = synsetToDB relationsMap lexicographerMap index synset

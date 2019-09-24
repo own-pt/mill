@@ -13,8 +13,9 @@ import Data ( Synset(..), Unvalidated, Validated
             , Validation(..), SourceValidation, singleton
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
+            , showLongWNPOS, synsetPOS
             , validate, validation )
-import Export (synsetsToSynsetJSONs, calculateOffsets, showDBSynset)
+import Export (DBSynset(..), calculateOffsets, newline, showDBSynset, synsetsToSynsetJSONs)
 import Parse (parseLexicographer)
 import Validate ( makeIndex, Index, indexSynsets
                 , validateSynsets, checkIndexNoDuplicates )
@@ -25,7 +26,7 @@ import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFile)
 import Data.ByteString.Builder (hPutBuilder)
 import Data.Either (partitionEithers)
-import Data.List (intercalate,find)
+import Data.List (intercalate, find)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -37,6 +38,7 @@ import qualified Data.Text.IO as TIO
 import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 import qualified Data.Text.Read as TR
+import Data.Traversable (mapAccumL)
 import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
 import Development.Shake.FilePath ((<.>), (-<.>), takeFileName)
@@ -44,7 +46,7 @@ import System.Directory ( canonicalizePath, doesDirectoryExist
                         , doesDirectoryExist )
 import System.FilePath ((</>), normalise, equalFilePath, takeDirectory, splitFileName)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
-import Debug.Trace
+--import Debug.Trace
 
 -- | This datastructure contains the information found in the
 -- configuration files (currently only lexnames.tsv and relations.tsv
@@ -253,12 +255,18 @@ build = do
 toWNDB :: FilePath -> App ()
 toWNDB outputDir = do
   Config{lexnamesToId, textToCanonicNames} <- ask
-  io <- validation prettyPrintList (go textToCanonicNames lexnamesToId) <$> getValidated
-  _  <- liftIO io
+  ioAction <- validation prettyPrintList (go textToCanonicNames lexnamesToId) <$> getValidated
+  _  <- liftIO ioAction
   return ()
   where
     go :: Map Text Text -> Map Text Int -> (Index (Synset a), NonEmpty (Synset Validated)) -> IO ()
     go relationsMap lexicographerMap (index, synsets) =
-      let (offsetMap, dbSynsets) = calculateOffsets 0 relationsMap lexicographerMap index synsets
-          output = mconcat . NE.toList . NE.intersperse "\n" $ NE.map (showDBSynset offsetMap) dbSynsets
-      in TIO.writeFile (trace outputDir outputDir) output
+      let synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
+          -- we need to calculate all offsets before writing the file
+          (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
+      in mapM_ (toDB offsetMap) dbSynsetsByPOS
+      where
+        makeOffsetMap currOffsetMap = calculateOffsets 0 currOffsetMap relationsMap lexicographerMap index
+        toDB finalOffsetMap posDBsynsets@(x:|_) =
+          let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset finalOffsetMap) posDBsynsets
+          in TIO.writeFile (outputDir </> "data" <.> (T.unpack . showLongWNPOS $ pos x)) output

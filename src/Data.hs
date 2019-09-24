@@ -58,6 +58,13 @@ readLongWNPOS "adj"  = Just A
 readLongWNPOS "adv"  = Just R
 readLongWNPOS _      = Nothing
 
+showLongWNPOS :: WNPOS -> Text
+showLongWNPOS N = "noun"
+showLongWNPOS V = "verb"
+showLongWNPOS R = "adv"
+showLongWNPOS A = "adj"
+showLongWNPOS S = "adj"
+
 newtype LexicographerFileId = LexicographerFileId (WNPOS, Text)
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary,ToJSON)
@@ -176,6 +183,9 @@ instance Ord (Synset Validated) where
   Synset{wordSenses = (headWord:|_)} <= Synset{wordSenses = (headWord2:|_)}
     = headWord <= headWord2
 
+synsetPOS :: Synset a -> WNPOS
+synsetPOS Synset{lexicographerFileId = LexicographerFileId (wnPOS, _)} = wnPOS
+
 ---- validation
 data Validation e a = Failure e | Success a deriving (Binary,Eq,Generic,Show)
 
@@ -240,11 +250,7 @@ type SourceValidation a = Validation (NonEmpty SourceError) a
 
 --- Pretty instances
 instance Pretty WNPOS where
-  pretty N = "noun"
-  pretty V = "verb"
-  pretty R = "adv"
-  pretty A = "adj"
-  pretty S = "adj"
+  pretty = pretty . showLongWNPOS
 
 instance Pretty LexicographerFileId where
   pretty (LexicographerFileId (wnPOS, lexicographerName)) =
