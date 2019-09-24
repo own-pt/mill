@@ -1,3 +1,4 @@
+{-# LANGUAGE StrictData #-}
 module Export where
 
 import Data ( LexicographerFileId(..)
@@ -9,6 +10,7 @@ import Validate (Index, indexKey, lookupIndex)
 ---
 import Data.Aeson ( ToJSON(..), fromEncoding, Value
                   , object, (.=) )
+import qualified Data.ByteString as B
 import Data.ByteString.Builder (Builder,charUtf8)
 import Data.List (find, findIndex, mapAccumL)
 import Data.List.NonEmpty(NonEmpty(..))
@@ -18,7 +20,7 @@ import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc (Doc, (<+>), hsep, pipe, pretty)
+import Data.Text.Encoding (encodeUtf8)
 import Numeric (showHex)
 import Prelude hiding (lookup)
 
@@ -62,6 +64,7 @@ synsetsToSynsetJSONs textToCanonicNames lexNamesToLexNum synsets
   = mconcat . NE.toList . NE.intersperse (charUtf8 '\n')
   $ NE.map (fromEncoding . toEncoding . synsetToJSON textToCanonicNames lexNamesToLexNum) synsets
 
+
 ---
 -- WNDB
 
@@ -88,7 +91,8 @@ synsetToDB relationsMap lexicographerMap index
                                        lexicographerMap
            , pos = (\(LexicographerFileId (wnPos,_)) -> wnPos) lexicographerFileId
            , wordSenses = NE.map toWord wordSenses -- FIXME: add syntactic marker
-           , gloss = T.intercalate "; " (definition : map (\e -> T.cons '"' $ T.snoc e '"') examples) -- FIXME: add quotes
+           , gloss = T.intercalate "; " (definition
+                                         : map (\e -> T.cons '"' $ T.snoc e '"') examples)
            , frames = map synsetFrame frames
                     ++ concatMap toWordFrames (zip [1..] $ NE.toList wordSenses)
            , relations = map synsetRelation relations
@@ -122,23 +126,27 @@ synsetToDB relationsMap lexicographerMap index
            (error $ "No wordsense corresponding to word sense " ++ show wnIdentifier)
            $ findIndex (\(WNWord (WordSenseIdentifier wnId) _ _) -> wnId == wnIdentifier) synsetWords
 
+tshow :: Show a => a -> Text
+tshow = T.pack . show 
+
 -- render a DBSynset; this is done twice for each synset, the first
 -- one has no offset data and is used to calculate it. in the second
--- run we can use the offsets
---- FIXME: we can just output Text here, no?
-showSynsetDB :: Map String Int -> DBSynset -> Doc a
-showSynsetDB offsetMap DBSynset{ synsetId, lexicographerFileNum, pos, wordSenses, frames, relations, gloss}
-  = offsetDoc
-  <+> pretty lexicographerFileNum
-  <+> showPos pos
-  <+> wordCount
-  <+> hsep (NE.toList $ NE.map synsetWord wordSenses)
-  <+> pointerCount <+> hsep (map synsetPointer relations)
-  <+> padNum 2 (length frames) <+> hsep (map synsetFrame frames)
-  <+> pipe <+> pretty gloss
+-- run we can use the offsets. this is not optimized at all, but
+-- performance seems acceptable, so who cares.
+showDBSynset :: Map String Int -> DBSynset -> Text
+showDBSynset offsetMap DBSynset{ synsetId, lexicographerFileNum, pos, wordSenses, frames, relations, gloss}
+  = T.unwords
+  [ offsetDoc
+  , tshow lexicographerFileNum
+  , showPos pos
+  , wordCount
+  , T.unwords . NE.toList $ NE.map synsetWord wordSenses
+  , pointerCount, T.unwords $ map synsetPointer relations
+  , padNum 2 $ length frames, T.unwords $ map synsetFrame frames
+  , "|", gloss]
   where
     pointerCount = padNum 3 $ length relations
-    wordCount = pretty $ (showHex $ NE.length wordSenses) ""
+    wordCount = T.pack $ (showHex $ NE.length wordSenses) ""
     showPos N = "n"
     showPos V = "v"
     showPos S = "s"
@@ -148,20 +156,24 @@ showSynsetDB offsetMap DBSynset{ synsetId, lexicographerFileNum, pos, wordSenses
     offsetDoc = idOffset synsetId
     padNum n m = let x = T.pack $ show m in padText n x
     paddedHex n h = padText n . T.pack $ showHex h ""
-    padText n x = pretty $ T.append (T.replicate (n - T.length x) "0") x
-    synsetWord (wordForm, lexId) = pretty (T.replace " " "_" wordForm) <+> pretty (showHex lexId "")
+    padText n x = T.append (T.replicate (n - T.length x) "0") x
+    synsetWord (wordForm, lexId) = T.unwords [T.replace " " "_" wordForm, T.pack $ showHex lexId ""]
     synsetPointer (pointerSym, SynsetIdentifier targetId, targetPos, (sourceNum,targetNum))
-      =   pretty pointerSym <+> idOffset targetId <+> showPos targetPos
-      <+> paddedHex 2 sourceNum <> paddedHex 2 targetNum
-    synsetFrame (frameNum, wordNum) = padNum 2 frameNum <+> paddedHex 2 wordNum
+      = T.unwords [ pointerSym, idOffset targetId, showPos targetPos
+                  , paddedHex 2 sourceNum <> paddedHex 2 targetNum ]
+    synsetFrame (frameNum, wordNum) = padNum 2 frameNum <> " " <> paddedHex 2 wordNum
 
-makeFauxDBs :: Map Text Text -> Map Text Int -> Index (Synset a) -> [Synset Validated]
-  -> (Map String Int, [DBSynset])
-makeFauxDBs relationsMap lexicographerMap index = mapAccumL go M.empty
+calculateOffsets :: Int -> Map Text Text -> Map Text Int -> Index (Synset a) -> NonEmpty (Synset Validated)
+  -> (Map String Int, NonEmpty DBSynset)
+calculateOffsets startOffset relationsMap lexicographerMap index synsets
+  = (\((offsetMap, _), dbSynsets) -> (offsetMap, dbSynsets)) $ mapAccumL go (M.empty, startOffset) synsets
   where
-    go :: Map String Int -> Synset Validated -> (Map String Int, DBSynset)
-    go offsetMap synset =
-      let synsetDB@DBSynset{synsetId = (lexFile, lexForm, lexId)} = synsetToDB relationsMap lexicographerMap index synset
-      in ( M.insert (indexKey lexFile lexForm lexId) 0 offsetMap -- FIXME: add offset
-         , synsetDB
+    getBytesize = B.length . encodeUtf8
+    newlineSize = getBytesize "\n"
+    go :: (Map String Int, Int) -> Synset Validated -> ((Map String Int, Int), DBSynset)
+    go (offsetMap, offset) synset =
+      let dbSynset@DBSynset{synsetId = (lexFile, lexForm, lexId)} = synsetToDB relationsMap lexicographerMap index synset
+          increment = getBytesize $ showDBSynset M.empty dbSynset
+      in ( (M.insert (indexKey lexFile lexForm lexId) offset offsetMap, offset + increment + newlineSize)
+         , dbSynset
          )

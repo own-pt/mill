@@ -3,18 +3,21 @@ module Main where
 import Lib ( validateLexicographerFile
            , validateLexicographerFiles
            , lexicographerFilesJSON
-           , readConfig )
+           , readConfig
+           , toWNDB )
 
 import Control.Monad.Reader (ReaderT(..))
-import Options.Applicative ( customExecParser, prefs, ParserInfo, Parser, showHelpOnError
-                           , command, subparser, info, helper, fullDesc, progDesc
-                           , argument, str, help, metavar, header )
+import Options.Applicative ( (<|>), argument, command, customExecParser, flag, fullDesc
+                           , help, helper, info, long, metavar, header, Parser
+                           , ParserInfo, prefs, progDesc, showHelpOnError, str, subparser )
 import System.Directory (doesDirectoryExist)
 import System.FilePath (takeDirectory)
 
+data ExportFormat = WNJSON | WNDB deriving (Show)
+
 data Command = Validate FilePath
-  | ExportJSONCommand FilePath FilePath
-             deriving Show
+  | ExportCommand ExportFormat FilePath FilePath
+             deriving (Show)
 
 showHelpOnErrorExecParser :: ParserInfo a -> IO a
 showHelpOnErrorExecParser = customExecParser (prefs showHelpOnError)
@@ -40,12 +43,12 @@ parseValidateCommand = Validate <$> validateParser
       (metavar "PATH" <> help "Validates one lexicographer file in case PATH is a file, else validates all lexicographer files in directory. Assumes lexnames.tsv is in the same PATH")
 
 parseExportCommand :: Parser Command
-parseExportCommand = jsonCommand
+parseExportCommand = exportParser
   where
-    -- jsonFlag :: Parser ()
-    -- jsonFlag = flag' () (long "json" <> help "Export to sensetion's JSON format")
-    jsonCommand = --jsonFlag *>
-      ExportJSONCommand <$> configDir <*> outputFile
+    jsonFlag = flag WNJSON WNJSON (long "json" <> help "Export to sensetion's JSON format [default]")
+    wndbFlag = flag WNJSON WNDB   (long "wndb" <> help "Export to WNDB format")
+    exportParser =
+      ExportCommand <$> (jsonFlag <|> wndbFlag) <*> configDir <*> outputFile
     configDir = argument str
       (metavar "DIR" <> help "Directory where configuration files in")
     outputFile = argument str
@@ -71,6 +74,9 @@ main = do
                   then validateLexicographerFiles
                   else validateLexicographerFile filepath)
         config
-    (ExportJSONCommand configDir outputFile) -> do
+    (ExportCommand WNJSON configDir outputFile) -> do
       config <- readConfig configDir
       runReaderT (lexicographerFilesJSON outputFile) config
+    (ExportCommand WNDB configDir outputFile) -> do
+      config <- readConfig configDir
+      runReaderT (toWNDB outputFile) config

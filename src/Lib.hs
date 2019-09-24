@@ -6,19 +6,20 @@ module Lib
     , validateLexicographerFiles
     , lexicographerFilesJSON
     , readConfig
+    , toWNDB
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
             , Validation(..), SourceValidation, singleton
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
-            , validate )
-import Export (synsetsToSynsetJSONs)
+            , validate, validation )
+import Export (synsetsToSynsetJSONs, calculateOffsets, showDBSynset)
 import Parse (parseLexicographer)
 import Validate ( makeIndex, Index, indexSynsets
                 , validateSynsets, checkIndexNoDuplicates )
 ----------------------------------
-import Control.Monad (unless,(>>),mapM)
+import Control.Monad (unless,(>>),mapM,void)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFile)
@@ -43,7 +44,7 @@ import System.Directory ( canonicalizePath, doesDirectoryExist
                         , doesDirectoryExist )
 import System.FilePath ((</>), normalise, equalFilePath, takeDirectory, splitFileName)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
---import Debug.Trace
+import Debug.Trace
 
 -- | This datastructure contains the information found in the
 -- configuration files (currently only lexnames.tsv and relations.tsv
@@ -151,7 +152,30 @@ lexicographerFilesJSON outputFile = do
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)
 
+getValidated :: App (SourceValidation (Index (Synset Unvalidated), NonEmpty (Synset Validated)))
+getValidated = do
+  _ <- build
+  Config{lexFilePaths} <- ask
+  validationIndices <- liftIO $ sequenceA <$> mapM readCachedIndex lexFilePaths
+  let validationIndex = bimap id sconcat validationIndices
+  case (validationIndex, validationIndices) of
+    (Failure parseErrors, _)
+      -> return $ Failure parseErrors
+    (Success index, Success indices)
+      -> case sconcat $ NE.map (go index) indices of
+           Success validatedSynsets -> return $ Success (index, validatedSynsets)
+           Failure errors -> return $ Failure errors
+    (Success _, Failure impossible) -> return $ Failure impossible  -- never happens
+  where
+    go :: Index (Synset Unvalidated) -> Index (Synset Unvalidated) -> SourceValidation (NonEmpty (Synset Validated))
+    go index targetIndex =
+     case indexSynsets targetIndex of
+       [] -> error "No synsets in target index" -- never happens
+       (x:synsets) -> validateSynsets index (x:|synsets)
+
 validateLexicographerFile :: FilePath -> App ()
+-- | Validates lexicographer file without semantically validating all
+-- other files (as long as they are syntactically valid)
 validateLexicographerFile filePath = do
   normalFilePath   <- liftIO $ canonicalizePath filePath
   _ <- build
@@ -190,24 +214,8 @@ validateLexicographerFile filePath = do
 
 validateLexicographerFiles :: App ()
 validateLexicographerFiles = do
-  _ <- build
-  Config{lexFilePaths} <- ask
-  validationIndices <- liftIO $ sequenceA <$> mapM readCachedIndex lexFilePaths
-  let validationIndex = bimap id sconcat validationIndices
-  liftIO $ case (validationIndex, validationIndices) of
-    (Failure parseErrors, _)
-      -> prettyPrintList parseErrors
-    (Success index, Success indices)
-      -> mapM_ (go index) indices
-    (Success _, Failure _) -> return () -- never happens
-  where
-    go index targetIndex =
-     case indexSynsets targetIndex of
-       [] -> return ()
-       (x:synsets) -> case validateSynsets index (x:|synsets) of
-         Success _ -> return ()
-         Failure validationErrors -> prettyPrintList validationErrors
-           
+  _ <- bimap prettyPrintList void <$> getValidated
+  return ()
 
 readCachedIndex :: FilePath
   -> IO (SourceValidation (Index (Synset Unvalidated)))
@@ -241,3 +249,16 @@ build = do
        let validIndex = bimap id makeIndex result
        liftIO . encodeFile outFilePath
          $ validate checkIndexNoDuplicates validIndex
+
+toWNDB :: FilePath -> App ()
+toWNDB outputDir = do
+  Config{lexnamesToId, textToCanonicNames} <- ask
+  io <- validation prettyPrintList (go textToCanonicNames lexnamesToId) <$> getValidated
+  _  <- liftIO io
+  return ()
+  where
+    go :: Map Text Text -> Map Text Int -> (Index (Synset a), NonEmpty (Synset Validated)) -> IO ()
+    go relationsMap lexicographerMap (index, synsets) =
+      let (offsetMap, dbSynsets) = calculateOffsets 0 relationsMap lexicographerMap index synsets
+          output = mconcat . NE.toList . NE.intersperse "\n" $ NE.map (showDBSynset offsetMap) dbSynsets
+      in TIO.writeFile (trace outputDir outputDir) output

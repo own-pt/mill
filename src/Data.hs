@@ -187,6 +187,13 @@ instance Bifunctor Validation where
   bimap f _ (Failure e) = Failure (f e)
   bimap _ g (Success a) = Success (g a)
 
+instance (Semigroup e, Semigroup a) => Semigroup (Validation e a) where
+  Success s <> Success u = Success $ s <> u
+  Success _ <> Failure f = Failure f
+  Failure f <> Success _ = Failure f
+  Failure f <> Failure a = Failure $ f <> a
+
+
 instance Semigroup e => Applicative (Validation e) where
   --  pure :: a -> Validation e a
   pure = Success
@@ -199,6 +206,10 @@ instance Semigroup e => Applicative (Validation e) where
 validate :: (a -> Validation e b) -> Validation e a -> Validation e b
 validate f (Success a) = f a
 validate _ (Failure e) = Failure e
+
+validation :: (e -> b) -> (a -> b) -> Validation e a -> b
+validation f _ (Failure e) = f e
+validation _ g (Success a) = g a
 
 data WNError
   = ParseError String
