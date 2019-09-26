@@ -155,7 +155,7 @@ relationNameP obj name = do
                        _            -> fail $ relationString
                                             ++ " is not a valid relation for a " ++ show obj
                                             ++ " with PoS " ++ show wnPOS
-                     Nothing -> error $ "Can't find " ++ T.unpack relationName ++ "'s domain"
+                     Nothing -> error $ "Can't find " ++ relationString ++ "'s domain"
     Nothing -> failure (Just $ toErrorItem relationName)
                        (S.fromList . map toErrorItem $ M.keys relationsMap)
   where

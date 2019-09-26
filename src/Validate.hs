@@ -187,6 +187,7 @@ checkWordSensePointersTargets index = traverse checkWordPointer
 validateSynsets :: Index (Synset Unvalidated)
   -> NonEmpty (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
+-- | validates synsets from the same lexicographer file against index
 validateSynsets index (firstSynset:|synsets) =
   checkSynsetsOrder checkedSynsets
   where
