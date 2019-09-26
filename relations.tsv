@@ -21,7 +21,9 @@ attribute	=	attr	attribute	n,a	synset	Attribute
 causes	>	cause	causes	v	synset	Cause
 hypernymOf	@	hyper	hypernymOf	n,v	synset	Hypernym
 instanceOf	@i	ihyper	instanceOf	n	synset	Instance Hypernym (9/11 is a terrorist attack)
-pertainsTo	\	pe	pertainsTo	a,r	word	Pertainym pertains to noun/adjective
+-- these 2 are not duplicates, see their rdf names
+pertainsTo	\	pe	adverbPertainsTo	a,r	word	Pertainym pertains to noun/adjective
+pertainsTo	\	pe	adjectivePertainsTo	a,r	word	Pertainym pertains to noun/adjective
 seeAlso	^	see	seeAlso	v,a	synset,word	Also see
 hyponymOf	~	hypo	hyponymOf	n,v	synset	Hyponym
 hasInstance	~i	ihypo	hasInstance	n	synset	Instance Hyponym (terrorist attack has instance 9/11)

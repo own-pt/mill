@@ -16,6 +16,8 @@ WN30EN = Namespace("https://w3id.org/own-pt/wn30-en/instances/")
 def cli():
     return None
 
+SYNSET_RELATIONS, WORD_RELATIONS, FRAMES_TO_ID = {}, {}, {}
+
 
 @cli.command()
 @click.argument('rdf_input',
@@ -30,11 +32,11 @@ def cli():
 def to_text(rdf_input, config_dir, output_dir, rdf_file_format="nt"):
     """Convert RDF_INPUT to lexicographer files placed at OUTPUT_DIR,
 according to the configuration files in CONFIG_DIR."""
-    (synset_relations, word_relations, frames_to_id) = read_config(config_dir)
+    global SYNSET_RELATIONS, WORD_RELATIONS, FRAMES_TO_ID
+    (SYNSET_RELATIONS, WORD_RELATIONS, FRAMES_TO_ID) = read_config(config_dir)
     graph = Graph()
     graph.parse(rdf_input, format=rdf_file_format)
-    print_graph(graph, synset_relations, word_relations,
-                frames_to_id, output_dir)
+    print_graph(graph, output_dir)
 
 ###
 ## rdf -> text
@@ -62,7 +64,7 @@ def read_config(config_dir):
 
     def read_relations(res, fields):
         (synset_relations, word_relations) = res
-        relation_name = fields[0]
+        relation_name = fields[3]
         relation_text = fields[2]
         if relation_text != "_":
             if fields[5] == "word":
@@ -85,15 +87,14 @@ def read_config(config_dir):
     return (synset_relations, word_relations, frames)
 
 
-def print_graph(graph, synset_relations, word_relations, frames_to_id, output_dir):
+def print_graph(graph, output_dir):
     query_results = graph.query(
         """SELECT DISTINCT ?lexFile
        WHERE {
           ?_ wn30:lexicographerFile ?lexFile .
        }""", initNs={'wn30': WN30})
     for (lexicographer_file,) in query_results:
-        print_lexfile(graph, lexicographer_file, synset_relations,
-                      word_relations, frames_to_id, output_dir)
+        print_lexfile(graph, lexicographer_file, output_dir)
 
 
 def sort_word_senses(graph, synset):
@@ -108,8 +109,7 @@ def sort_synsets(graph, synsets):
     return sorted(synsets_word_senses, key=lambda i: word_sense_id(graph, "", i[1][0]))
 
 
-def print_lexfile(graph, lexicographer_file, synset_relations,
-                  word_relations, frames_to_id, output_dir):
+def print_lexfile(graph, lexicographer_file, output_dir):
     with open(os.path.join(output_dir, lexicographer_file), 'w+') as output_stream:
         write = lambda data, *args, **kwargs: print(data, file=output_stream,
                                                     *args, **kwargs)
@@ -117,8 +117,7 @@ def print_lexfile(graph, lexicographer_file, synset_relations,
         write("{}.{}".format(pos, lexname), end="\n\n")
         synsets = graph.subjects(WN30['lexicographerFile'], lexicographer_file)
         for synset, sorted_word_senses in sort_synsets(graph, synsets):
-            print_synset(graph, synset, sorted_word_senses, lexicographer_file,
-                         synset_relations, word_relations, frames_to_id, write)
+            print_synset(graph, synset, sorted_word_senses, lexicographer_file, write)
 
 
 def word_sense_id(graph, lexicographer_file, word_sense):
@@ -144,8 +143,7 @@ def print_word_sense_id(wordsense_id, lexicographer_file=None):
                            " {}".format(lexical_id) if lexical_id != 0 else "")
 
 
-def print_synset(graph, synset, sorted_word_senses, lexicographer_file, synset_relations,
-                 word_relations, frames_to_id, write):
+def print_synset(graph, synset, sorted_word_senses, lexicographer_file, write):
     def print_relations():
         def print_relation(name, wordsense_id):
             return "{}: {}".format(name,
@@ -153,7 +151,7 @@ def print_synset(graph, synset, sorted_word_senses, lexicographer_file, synset_r
         rels = []
         for predicate, obj in graph.predicate_objects(synset):
             _, predicate_name = r.namespace.split_uri(predicate)
-            predicate_txt_name = synset_relations.get(predicate_name, None)
+            predicate_txt_name = SYNSET_RELATIONS.get(predicate_name, None)
             if predicate_name in ["frame", "containsWordSense", "gloss",
                                   "example", "lexicographerFile", "lexicalForm"]:
                 pass
@@ -162,11 +160,14 @@ def print_synset(graph, synset, sorted_word_senses, lexicographer_file, synset_r
                              word_sense_id(graph, lexicographer_file,
                                            # first word sense is head
                                            sort_word_senses(graph, obj)[0])))
+            # # we can't raise this error because we decided to ignore lots of relations
+            # else:
+            #     raise LookupError("{} relation not found".format(predicate_name))
         rels.sort()
         for (relation_name, target) in rels:
             write(print_relation(relation_name, target))
 
-    def print_synset_gloss_splited_in_defintion_and_examples(gloss):
+    def print_synset_gloss_splited_in_definition_and_examples(gloss):
         def remove_quotes(example):
             if example[-1] == "\"" and "\"" not in example[:-1]:
                 return example.strip("\"")
@@ -176,31 +177,29 @@ def print_synset(graph, synset, sorted_word_senses, lexicographer_file, synset_r
         def_examples = gloss.split("; \"")
         definition = def_examples[0].strip()
         examples = def_examples[1:]
-        write("{}: {}".format(synset_relations["definition"], definition))
+        write("{}: {}".format(SYNSET_RELATIONS["definition"], definition))
         for example in examples:
             write("{}: {}".format(
-                synset_relations["example"], remove_quotes(example.strip())))
+                SYNSET_RELATIONS["example"], remove_quotes(example.strip())))
 
     for word_sense in sorted_word_senses:
-        print_word_sense(graph, word_sense, lexicographer_file,
-                         word_relations, synset_relations, frames_to_id, write)
+        print_word_sense(graph, word_sense, lexicographer_file, write)
     # definition
-    print_synset_gloss_splited_in_defintion_and_examples(
+    print_synset_gloss_splited_in_definition_and_examples(
         graph.value(synset, WN30["gloss"]))
     # examples
     for example in graph.objects(synset, WN30["example"]):
-        write("{}: {}".format(synset_relations["example"], example))
+        write("{}: {}".format(SYNSET_RELATIONS["example"], example))
     # frames
     frames = graph.objects(synset, WN30["frame"])
-    frame_ids = list(map(lambda frame: frames_to_id[frame.n3()[1:-1]], frames))
+    frame_ids = list(map(lambda frame: FRAMES_TO_ID[frame.n3()[1:-1]], frames))
     if frame_ids:
-        write("{}: {}".format(synset_relations['frame'], " ".join(frame_ids)))
+        write("{}: {}".format(SYNSET_RELATIONS['frame'], " ".join(frame_ids)))
     print_relations()
     write("")
 
 
-def print_word_sense(graph, word_sense, lexicographer_file,
-                     word_relations, synset_relations, frames_to_id, write):
+def print_word_sense(graph, word_sense, lexicographer_file, write):
     def print_word_relations():
         def print_word_relation(name, wordsense_id):
             return " {} {}".format(name,
@@ -210,28 +209,31 @@ def print_word_sense(graph, word_sense, lexicographer_file,
         markers = []
         for predicate, obj in graph.predicate_objects(word_sense):
             _, predicate_name = r.namespace.split_uri(predicate)
-            predicate_txt_name = word_relations.get(predicate_name, None)
+            predicate_txt_name = WORD_RELATIONS.get(predicate_name, None)
             if predicate_name == "frame":
-                frames.append(frames_to_id[str(obj)])
+                frames.append(FRAMES_TO_ID[str(obj)])
             elif predicate_name == "syntacticMarker":
                 markers.append(obj)
             elif predicate_txt_name:
                 relations.append((predicate_txt_name,
                                   word_sense_id(graph, lexicographer_file, obj)))
+            # # we can't raise this error because we decided to ignore lots of relations
+            # else:
+            #     raise lookuperror("{} not found".format(predicate_name))
         if frames:
             frames.sort()
             write(" {} {}".format(
-                word_relations["frame"], " ".join(frames)), end="")
+                WORD_RELATIONS["frame"], " ".join(frames)), end="")
         if markers:
             [marker] = markers  # check that there is only one marker
             write(" {} {}".format(
-                word_relations["syntacticMarker"], marker), end="")
+                WORD_RELATIONS["syntacticMarker"], marker), end="")
         relations.sort()
         for relation_name, target in relations:
             write(print_word_relation(relation_name, target), end="")
         write("")
 
-    write("{}: {}".format(synset_relations['containsWordSense'],
+    write("{}: {}".format(SYNSET_RELATIONS['containsWordSense'],
                           print_word_sense_id(word_sense_id(graph,
                                                             lexicographer_file,
                                                             word_sense),

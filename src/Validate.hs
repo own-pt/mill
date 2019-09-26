@@ -2,9 +2,13 @@
 module Validate
   ( validateSynsets
   , checkIndexNoDuplicates
+  , DupsIndex
   , indexSynsets
+  , lookupIndex
   , makeIndex
   , Index
+  , indexKey
+  , wordSenseKey
   ) where
 
 import Data
@@ -16,7 +20,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
-import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toAscList,mapAccumWithKey',lookup,)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toAscList,mapAccumWithKey',lookup)
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
@@ -63,8 +67,9 @@ wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexica
   = indexKey lexicographerFileId wordForm lexicalId
 
 indexKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
--- [ ] this is not really a sense key
+-- this is NOT the sensekey
 indexKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
+  -- if changing this definition change WNDB export too
   intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, pad $ show lexicalId]
   where
     pad x = replicate (2 - length x) '0' ++ x
@@ -182,6 +187,7 @@ checkWordSensePointersTargets index = traverse checkWordPointer
 validateSynsets :: Index (Synset Unvalidated)
   -> NonEmpty (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
+-- | validates synsets from the same lexicographer file against index
 validateSynsets index (firstSynset:|synsets) =
   checkSynsetsOrder checkedSynsets
   where
@@ -203,3 +209,9 @@ indexSynsets = concatMap (either (const []) (:[]) . snd) . toAscList
 
 ---
 
+lookupIndex :: String -> Index (Synset a) -> Maybe (Synset a)
+lookupIndex key index =
+  case lookup key index of
+    Just (Left headKey) -> lookupIndex headKey index
+    Just (Right synset) -> Just synset
+    Nothing -> Nothing
