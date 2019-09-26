@@ -10,6 +10,7 @@ import click
 
 WN30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
 WN30EN = Namespace("https://w3id.org/own-pt/wn30-en/instances/")
+WN30PT = Namespace("https://w3id.org/own-pt/wn30-pt/instances/") # not used (yet)
 
 
 @click.group()
