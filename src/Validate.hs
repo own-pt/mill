@@ -2,6 +2,7 @@
 module Validate
   ( validateSynsets
   , checkIndexNoDuplicates
+  , DupsIndex
   , indexSynsets
   , lookupIndex
   , makeIndex
@@ -66,8 +67,9 @@ wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexica
   = indexKey lexicographerFileId wordForm lexicalId
 
 indexKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
--- [ ] this is not really a sense key
+-- this is NOT the sensekey
 indexKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
+  -- if changing this definition change WNDB export too
   intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, pad $ show lexicalId]
   where
     pad x = replicate (2 - length x) '0' ++ x

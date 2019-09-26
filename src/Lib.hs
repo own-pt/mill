@@ -15,7 +15,8 @@ import Data ( Synset(..), Unvalidated, Validated
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
             , showLongWNPOS, synsetPOS
             , validate, validation )
-import Export (DBSynset(..), calculateOffsets, newline, showDBSynset, synsetsToSynsetJSONs)
+import Export ( DBSynset(..), calculateOffsets, makeIndexIndex, newline
+              , showDBSynset, showIndex, synsetsToSynsetJSONs )
 import Parse (parseLexicographer)
 import Validate ( makeIndex, Index, indexSynsets
                 , validateSynsets, checkIndexNoDuplicates )
@@ -26,7 +27,7 @@ import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFile)
 import Data.ByteString.Builder (hPutBuilder)
 import Data.Either (partitionEithers)
-import Data.List (intercalate, find)
+import Data.List (intercalate, find, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -46,7 +47,6 @@ import System.Directory ( canonicalizePath, doesDirectoryExist
                         , doesDirectoryExist )
 import System.FilePath ((</>), normalise, equalFilePath, takeDirectory, splitFileName)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
---import Debug.Trace
 
 -- | This datastructure contains the information found in the
 -- configuration files (currently only lexnames.tsv and relations.tsv
@@ -60,6 +60,9 @@ data Config = Config
   , canonicToDomain    :: Map Text (NonEmpty WNObj, NonEmpty WNPOS)
   -- | contains the filepaths to the files in the WordNet
   , lexFilePaths       :: NonEmpty FilePath
+  -- | maps relation names in text files to their (original)
+  -- lexicographer file names/symbols
+  , textToLexNames     :: Map Text Text
   } deriving (Show,Eq)
 
 readTSV :: Ord a => Text -> ([Text] -> Either String [(a, b)]) -> IO (Map a b)
@@ -86,10 +89,11 @@ readConfig configurationDir' = do
       lexnamesToId       <- readTSV lexNamesInput lexnamesReader
       relationsInput     <- TIO.readFile $ configurationDir </> "relations.tsv"
       textToCanonicNames <- readTSV relationsInput textToCanonicNamesReader
+      textToLexNames     <- readTSV relationsInput textToLexNamesReader
       canonicToDomain    <- readTSV relationsInput canonicToDomainReader
       let lexFilePaths = lexFilePaths' lexnamesToId
       return $ Config {lexnamesToId, textToCanonicNames
-                      , lexFilePaths, canonicToDomain
+                      , lexFilePaths, canonicToDomain, textToLexNames
                       }
         where
           lexFilePaths' lexNamesMap =
@@ -107,6 +111,9 @@ readConfig configurationDir' = do
           textToCanonicNamesReader [_,_,"_",_,_,_,_]      = Right []
           textToCanonicNamesReader [canonicName,_,textName,_,_,_,_] = Right [(textName, canonicName)]
           textToCanonicNamesReader _ = Left "Wrong number of fields in relations.tsv"
+          textToLexNamesReader [_,_,"_",_,_,_,_]      = Right []
+          textToLexNamesReader [_,lexName,textName,_,_,_,_] = Right [(textName, lexName)]
+          textToLexNamesReader _ = Left "Wrong number of fields in relations.tsv"
           canonicToDomainReader [canonicName,_,_,_,pos,domain,_] =
             Right [(canonicName, ( readListField readWNObj domain
                                  , readListField readShortWNPOS pos))]
@@ -254,19 +261,25 @@ build = do
 
 toWNDB :: FilePath -> App ()
 toWNDB outputDir = do
-  Config{lexnamesToId, textToCanonicNames} <- ask
-  ioAction <- validation prettyPrintList (go textToCanonicNames lexnamesToId) <$> getValidated
+  Config{lexnamesToId, textToLexNames} <- ask
+  ioAction <- validation prettyPrintList (go textToLexNames lexnamesToId) <$> getValidated
   _  <- liftIO ioAction
   return ()
   where
     go :: Map Text Text -> Map Text Int -> (Index (Synset a), NonEmpty (Synset Validated)) -> IO ()
-    go relationsMap lexicographerMap (index, synsets) =
-      let synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
-          -- we need to calculate all offsets before writing the file
-          (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
-      in mapM_ (toDB offsetMap) dbSynsetsByPOS
+    go relationsMap lexicographerMap (index, synsets) = do
+      mapM_ toData dbSynsetsByPOS
+      mapM_ toIndex [N,V,A,R] -- no S
       where
+        synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
+        -- we need to calculate all offsets before writing the file
+        (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
+        indexIndex = makeIndexIndex index
+        write filename wnPos = TIO.writeFile (outputDir </> filename <.> T.unpack (showLongWNPOS wnPos))
         makeOffsetMap currOffsetMap = calculateOffsets 0 currOffsetMap relationsMap lexicographerMap index
-        toDB finalOffsetMap posDBsynsets@(x:|_) =
-          let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset finalOffsetMap) posDBsynsets
-          in TIO.writeFile (outputDir </> "data" <.> (T.unpack . showLongWNPOS $ pos x)) output
+        toData posDBsynsets@(x:|_) =
+          let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset offsetMap) posDBsynsets
+          in write "data" (pos x) output
+        toIndex wnPOS =
+          let output = mconcat . intersperse newline $ showIndex wnPOS relationsMap offsetMap index indexIndex
+          in write "index" wnPOS output

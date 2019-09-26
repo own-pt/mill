@@ -14,6 +14,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import Data.String (IsString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest
@@ -40,15 +41,15 @@ readWNObj input = case input of
 unsafeLookup :: Ord k => String -> k -> Map k a -> a
 unsafeLookup errorMessage = M.findWithDefault $ error errorMessage
 
-data WNPOS = A | S | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Show,ToJSON)
+data WNPOS = A | S | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Read,Show,ToJSON)
 
-readShortWNPOS :: Text -> WNPOS
+readShortWNPOS :: (IsString a, Show a, Eq a) => a -> WNPOS
 readShortWNPOS "n" = N
 readShortWNPOS "a" = A
 readShortWNPOS "r" = R
 readShortWNPOS "v" = V
 readShortWNPOS "s" = S
-readShortWNPOS input = error $ T.unpack input ++ " is not a valid PoS"
+readShortWNPOS input = error $ show input ++ " is not a valid PoS"
 
 readLongWNPOS :: Text -> Maybe WNPOS
 readLongWNPOS "noun" = Just N
@@ -185,6 +186,10 @@ instance Ord (Synset Validated) where
 
 synsetPOS :: Synset a -> WNPOS
 synsetPOS Synset{lexicographerFileId = LexicographerFileId (wnPOS, _)} = wnPOS
+
+synsetId :: Synset a -> SynsetIdentifier
+synsetId Synset{wordSenses = WNWord (WordSenseIdentifier wnIdentifier) _ _:|_}
+  = SynsetIdentifier wnIdentifier
 
 ---- validation
 data Validation e a = Failure e | Success a deriving (Binary,Eq,Generic,Show)

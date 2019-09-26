@@ -166,7 +166,7 @@ def print_synset(graph, synset, sorted_word_senses, lexicographer_file, synset_r
         for (relation_name, target) in rels:
             write(print_relation(relation_name, target))
 
-    def print_synset_gloss_splited_in_defintion_and_examples(gloss):
+    def print_synset_gloss_splited_in_definition_and_examples(gloss):
         def remove_quotes(example):
             if example[-1] == "\"" and "\"" not in example[:-1]:
                 return example.strip("\"")
@@ -185,7 +185,7 @@ def print_synset(graph, synset, sorted_word_senses, lexicographer_file, synset_r
         print_word_sense(graph, word_sense, lexicographer_file,
                          word_relations, synset_relations, frames_to_id, write)
     # definition
-    print_synset_gloss_splited_in_defintion_and_examples(
+    print_synset_gloss_splited_in_definition_and_examples(
         graph.value(synset, WN30["gloss"]))
     # examples
     for example in graph.objects(synset, WN30["example"]):

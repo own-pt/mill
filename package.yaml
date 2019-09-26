@@ -32,6 +32,7 @@ dependencies:
 - base >= 4.7 && < 5
 - bytestring == 0.10.*
 - binary == 0.8.*
+- case-insensitive == 1.2.*
 - containers == 0.6.*
 - directory == 1.*
 - filepath == 1.*
