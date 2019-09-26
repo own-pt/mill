@@ -25,7 +25,7 @@ import Text.Printf (printf)
 singleton :: a -> NonEmpty a
 singleton x = x :| []
 
-data WNObj = SynsetObj | WordObj deriving (Binary,Eq,Enum,Generic)
+data WNObj = SynsetObj | WordObj deriving (Binary,Eq,Enum,Generic,Ord)
 
 instance Show WNObj where
   show SynsetObj = "synset"

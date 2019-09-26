@@ -21,7 +21,7 @@ import Parse (parseLexicographer)
 import Validate ( makeIndex, Index, indexSynsets
                 , validateSynsets, checkIndexNoDuplicates )
 ----------------------------------
-import Control.Monad (unless,(>>),mapM)
+import Control.Monad (unless,mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFile)
@@ -44,8 +44,8 @@ import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
 import Development.Shake.FilePath ((<.>), (-<.>), takeFileName)
 import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryIfMissing
-                        , doesDirectoryExist )
-import System.FilePath ((</>), normalise, equalFilePath, takeDirectory, splitFileName)
+                        , doesDirectoryExist, withCurrentDirectory )
+import System.FilePath ((</>), normalise, equalFilePath)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
 
 -- | This datastructure contains the information found in the
@@ -62,14 +62,19 @@ data Config = Config
   , lexFilePaths       :: NonEmpty FilePath
   -- | maps relation names in text files to their (original)
   -- lexicographer file names/symbols
-  , textToLexRelations     :: Map Text Text
+  , textToLexRelations :: Map Text Text
+  -- | where configuration files lie, the index gets written, etc. In
+  -- a multilanguage setting, only the files in this directory get
+  -- written to output formats
+  , wnDir :: FilePath
   } deriving (Show,Eq)
 
-readTSV :: Ord a => Text -> ([Text] -> Either String [(a, b)]) -> IO (Map a b)
-readTSV input readLine =
+readTSV :: (Semigroup a, Ord a) => ([Text] -> Either String a) -> Text -> a
+readTSV readLine input =
   case go input of
-    ([], pairs) -> return . M.fromList $ concat pairs
-    (errors, _) -> mapM_ putStrLn errors >> return M.empty
+    ([], x:xs) -> sconcat (x:|xs)
+    ([], []) -> error "No contents"
+    (errors, _) -> error $ unlines errors 
   where
     go = partitionEithers
       . map readLine -- read contents
@@ -87,40 +92,40 @@ readConfig configurationDir' = do
   unless isDirectory (error "Filepath must be a directory")
   go configurationDir
   where
+    readTSVwith filePath reader = readTSV reader <$> TIO.readFile filePath
     go configurationDir = do
-      lexNamesInput      <- TIO.readFile $ configurationDir </> "lexnames.tsv"
-      lexnamesToId       <- readTSV lexNamesInput lexnamesReader
-      relationsInput     <- TIO.readFile $ configurationDir </> "relations.tsv"
-      textToCanonicNames <- readTSV relationsInput textToCanonicNamesReader
-      textToLexRelations <- readTSV relationsInput textToLexRelationsReader
-      canonicToDomain    <- readTSV relationsInput canonicToDomainReader
-      let lexFilePaths = lexFilePaths' lexnamesToId
+      lexNamesInput      <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
+      relationsInput     <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
+      lexFilePaths       <- NE.fromList <$> mapM toLexFilePath lexNamesInput
+      let lexnamesToId = toMap toLexnamesToId lexNamesInput
+          textToCanonicNames = toMap toTextToCanonicName relationsInput
+          canonicToDomain = toMap toCanonicToDomain relationsInput
+          textToLexRelations = toMap toTextToLexRelations relationsInput
       return $ Config {lexnamesToId, textToCanonicNames
                       , lexFilePaths, canonicToDomain, textToLexRelations
+                      , wnDir = configurationDir
                       }
         where
-          lexFilePaths' lexNamesMap =
-            let lexnames = map normalize (M.keys lexNamesMap)
-            in if null lexnames
-            then error "No files specified in lexnames.tsv"
-            else NE.fromList lexnames
-          normalize lexFileId = configurationDir </> T.unpack lexFileId
-          lexnamesReader [lexnameIdStr, lexicographerFile, _] =
+          toMap f = M.fromList . map f
+          toLexFilePath (lexFileName, _, relativeDir)
+            = withCurrentDirectory configurationDir
+                 (canonicalizePath $ T.unpack relativeDir </> T.unpack lexFileName)
+          toLexnamesToId (lexFileName, lexNameId, _) = (lexFileName, lexNameId)
+          toTextToCanonicName (canonicName,_,textName,_) = (textName, canonicName)
+          toCanonicToDomain (canonicName, _,_, domain) = (canonicName, domain)
+          toTextToLexRelations (_,lexName, textName,_) = (textName, lexName)
+          lexnamesReader [lexnameIdStr, lexicographerFile, relativeDir, _] =
             case TR.decimal lexnameIdStr of
               Left err -> Left err
-              Right (lexnameId, "") -> Right [(lexicographerFile, lexnameId)]
+              Right (lexnameId, "") -> Right [(lexicographerFile, lexnameId :: Int, relativeDir)]
               Right (_, trailing) -> Left $ "Trailing garbage after " ++ T.unpack trailing
           lexnamesReader _ = Left "Wrong number of fields in lexnames.tsv"
-          textToCanonicNamesReader [_,_,"_",_,_,_,_]      = Right []
-          textToCanonicNamesReader [canonicName,_,textName,_,_,_,_] = Right [(textName, canonicName)]
-          textToCanonicNamesReader _ = Left "Wrong number of fields in relations.tsv"
-          textToLexRelationsReader [_,_,"_",_,_,_,_]      = Right []
-          textToLexRelationsReader [_,lexName,textName,_,_,_,_] = Right [(textName, lexName)]
-          textToLexRelationsReader _ = Left "Wrong number of fields in relations.tsv"
-          canonicToDomainReader [canonicName,_,_,_,pos,domain,_] =
-            Right [(canonicName, ( readListField readWNObj domain
-                                 , readListField readShortWNPOS pos))]
-          canonicToDomainReader _ = Left "wrong number of Fiels in relations.tsv"
+          relationsReader [_,_,"_",_,_,_,_] = Right []
+          relationsReader [canonicName,lexName,textName,_,pos,domain,_]
+            = Right [(canonicName, lexName, textName
+                     , (readListField readWNObj domain, readListField readShortWNPOS pos))
+                    ]
+          relationsReader _ = Left "Wrong number of fields in relations.tsv"
           readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
                                                                  
 
@@ -166,11 +171,11 @@ prettyPrintList = mapM_ (putDoc . pretty)
 getValidated :: App (SourceValidation (Index (Synset Unvalidated), NonEmpty (Synset Validated)))
 getValidated = do
   _ <- build
-  Config{lexFilePaths} <- ask
+  Config{lexFilePaths, wnDir} <- ask
   -- we first read the indices from the cache and sequence them; we
   -- can't merge them now because we need to validate the synsets from
   -- each file as a unit, or else we get spurious sort errors
-  validationIndices <- liftIO $ sequenceA <$> mapM readCachedIndex lexFilePaths
+  validationIndices <- liftIO $ sequenceA <$> mapM (readCachedIndex wnDir) lexFilePaths
   let validationIndex = bimap id sconcat validationIndices
   case (validationIndex, validationIndices) of
     (Failure parseErrors, _)
@@ -194,18 +199,17 @@ validateLexicographerFile :: FilePath -> App ()
 validateLexicographerFile filePath = do
   normalFilePath   <- liftIO $ canonicalizePath filePath
   _ <- build
-  Config{lexFilePaths} <- ask
+  Config{lexFilePaths, wnDir} <- ask
   liftIO $
     case NE.partition (equalFilePath normalFilePath) lexFilePaths of
-      ([_], otherFilePaths) -> liftIO $ go normalFilePath otherFilePaths
+      ([_], otherFilePaths) -> liftIO $ go wnDir normalFilePath otherFilePaths
       ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
       _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
-    go :: FilePath -> [FilePath] -> IO ()
-    go fileToValidate lexFilePaths = do
-      validationTargetFileIndex <- readCachedIndex fileToValidate
+    go wnDir fileToValidate lexFilePaths = do
+      validationTargetFileIndex <- readCachedIndex wnDir fileToValidate
       -- FIXME: use unionWith instead of sconcat?
-      validationOtherFileIndices <- sequenceA <$> mapM readCachedIndex lexFilePaths
+      validationOtherFileIndices <- sequenceA <$> mapM (readCachedIndex wnDir) lexFilePaths
       case (validationOtherFileIndices, validationTargetFileIndex) of
         (Failure parseErrors, Success _)
           -> prettyPrintList $ toSingleError parseErrors
@@ -234,19 +238,19 @@ validateLexicographerFiles = do
   _ <- liftIO ioAction
   return ()
 
-readCachedIndex :: FilePath
+readCachedIndex :: FilePath -> FilePath
   -> IO (SourceValidation (Index (Synset Unvalidated)))
-readCachedIndex lexFilePath = do
-  let (directoryPath, filePath) = splitFileName lexFilePath
-      indexPath = directoryPath </> ".cache" </> filePath <.> "index"
+readCachedIndex wnDir lexFilePath = do
+  let filePath = takeFileName lexFilePath
+      indexPath = wnDir </> ".cache" </> filePath <.> "index"
   decodeFile indexPath
 
 ---
 -- cache
 build :: App ()
 build = do
-  config@Config{lexFilePaths = lexFilePaths@(aLexFilePath:|_)} <- ask
-  let cachePath = takeDirectory aLexFilePath </> ".cache"
+  config@Config{wnDir, lexFilePaths = lexFilePaths} <- ask
+  let cachePath = wnDir </> ".cache"
   liftIO . shake shakeOptions{ shakeFiles=cachePath, shakeThreads=0 }
     $ do
     want . map (flip (<.>) "index" . (</>) cachePath . takeFileName)
