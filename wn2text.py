@@ -99,15 +99,20 @@ def print_graph(graph, output_dir):
 
 
 def sort_word_senses(graph, synset):
-    return sorted(graph.objects(synset, WN30["containsWordSense"]),
-                  key=lambda ws: graph.value(graph.value(ws, WN30["word"]),
-                                             WN30["lexicalForm"]))
+    def word_sense_form(ws):
+        word = graph.value(ws, WN30["word"])
+        lexical_form = graph.value(word, WN30["lexicalForm"])
+        return lexical_form
+    #
+    wordsenses = list(graph.objects(synset, WN30["containsWordSense"]))
+    return sorted(wordsenses,key=word_sense_form)
 
 
 def sort_synsets(graph, synsets):
-    synsets_word_senses = map(lambda ss: (
-        ss, sort_word_senses(graph, ss)), synsets)
-    return sorted(synsets_word_senses, key=lambda i: word_sense_id(graph, "", i[1][0]))
+    # careful when changing this, other scripts depend on this function
+    synsets_word_senses = map(lambda ss: (ss, sort_word_senses(graph, ss)), synsets)
+    result = sorted(synsets_word_senses, key=lambda i: word_sense_id(graph, "", i[1][0]))
+    return result
 
 
 def print_lexfile(graph, lexicographer_file, output_dir):
