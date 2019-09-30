@@ -4,6 +4,7 @@
 
 (require 'mill-flymake)
 (require 'seq)
+(require 'pcase)
 (require 'xref)
 
 ;; customizable variable
@@ -15,8 +16,12 @@
 
 ;; constants
 
-(defconst mill--frames-config-path
-  "frames.tsv")
+;; (defconst mill--frames-file-name
+;;   "frames.tsv")
+
+(defconst mill--lexnames-config-file-name
+  "lexnames.tsv")
+
 
 ;;; fontification
 
@@ -30,7 +35,7 @@
     "drf" "mt" "mr" "mu" "dt"
     "dr" "du" "attr" "cause"
     "hyper" "ihyper" "see"
-    "hypo" "ihypo"))
+    "hypo" "ihypo" "sa" "su" "sb"))
 
 (defconst mill--kwds-word-rel
   '("ant" "vg" "drf"
@@ -63,6 +68,8 @@
      nil
      (0 font-lock-constant-face))))
 
+(defalias 'mill-λ #'pcase-lambda)
+
 ;;  mill xref backend
 
 (defun mill--xref-backend () 'xref-mill)
@@ -86,8 +93,8 @@
 	 (let maybe-lex-id   (optional (one-or-more (char digit)))))
      (let ((lex-file (if (string-empty-p maybe-lex-name)
 			 (buffer-file-name)
-		       (format "%s%s" default-directory
-			       (string-trim-right maybe-lex-name ":"))))
+		       (mill--lexname->file-path
+			(string-trim-right maybe-lex-name ":"))))
 	   (lex-id (unless (string-empty-p maybe-lex-id) maybe-lex-id)))
        (mill--collect-xref-matches lex-file
 				   lex-form
@@ -150,32 +157,48 @@
        filename)))))
 
 
-(defun read-tsv (filepath)
-  (with-temp-buffer
-    (insert-file-contents filepath)
-    (goto-char (point-max))
-    (let ((result nil))
-      (while (not (bobp))
-	(let* ((line (thing-at-point 'line t))
-	       (fields (split-string line "\t" nil "[ \f\n\r\v]+")))
-	  (pcase fields
-	    (`(,singleton)
-	     (unless (or (equal (substring singleton 0 2) "--")
-			 (string-empty-p singleton))
-	       (push fields result)))
-	    (t (push fields result)))
-	  (forward-line -1)))
-      result)))
+(defun mill--read-tsv (filepath)
+  (cl-labels
+      ((read-line ()
+		  (let* ((line (thing-at-point 'line t))
+			 (fields (split-string line "\t" nil "[ \f\n\r\v]+")))
+		    (pcase fields
+		      (`(,singleton)
+		       (unless (or (equal (substring singleton 0 2) "--")
+				   (string-empty-p singleton))
+			 fields))
+		      (_ fields)))))
+    (with-temp-buffer
+      (insert-file-contents filepath)
+      (goto-char (point-max))
+      (let ((result nil))
+	(while (not (bobp))
+	  (let ((fields (read-line)))
+	    (when fields
+	      (push fields result)))
+	  (forward-line -1))
+	result))))
 
 
-(defalias 'mill--read-frames #'read-tsv "Read frames configuration file.")
+(defun mill--lexname->file-path (lexname)
+  (let* ((lines (mill--read-tsv (mill--configuration-file mill--lexnames-config-file-name)))
+	 (lexname->file-path-map (mapcar (mill-λ (`(,_id ,lexname ,relative-dir ,_description))
+					   (cons lexname relative-dir))
+					 lines)))
+    (concat
+     (file-name-as-directory
+      (map-elt lexname->file-path-map lexname nil #'equal))
+     lexname)))
 
-(defun mill-new-frame ()
-  "Create new frame at point."
-  (interactive)
-  (let* ((frames (mill--read-frames (mill--configuration-file mill--frames-config-path)))
-	 (choices (seq-map-indexed (lambda (elt idx) (cons (+ 97 idx) elt)) frames)))
-    (read-multiple-choice "Select frame: " choices)))
+;;; FIXME: add frame
+;; (defalias 'mill--read-frames #'mill--read-tsv "Read frames configuration file.")
+
+;; (defun mill-new-frame ()
+;;   "Create new frame at point."
+;;   (interactive)
+;;   (let* ((frames (mill--read-frames (mill--configuration-file mill--frames-config-path)))
+;; 	 (choices (seq-map-indexed (lambda (elt idx) (cons (+ 97 idx) elt)) frames)))
+;;     (read-multiple-choice "Select frame: " choices)))
 
 
 (defun mill--at-wordsense-line? ()
@@ -183,19 +206,20 @@
     (goto-char (line-beginning-position))
     (looking-at "w:")))
 
-
-(defun mill--new-wordsense-relation ())
-
-
-(defun mill--new-synset-relation ())
+;;; FIXME: add these
+;; (defun mill--new-wordsense-relation ())
 
 
-(defun mill-new-relation ()
-  "Create new relation at point."
-  (interactive)
-  (if (mill--at-wordsense-line?)
-      (mill--new-wordsense-relation)
-    (mill--new-synset-relation)))
+;; (defun mill--new-synset-relation ())
+
+
+;; (defun mill-new-relation ()
+;;   "Create new relation at point."
+;;   (interactive)
+;;   (if (mill--at-wordsense-line?)
+;;       (mill--new-wordsense-relation)
+;;     (mill--new-synset-relation)))
+
 
 ;;;###autoload
 (define-derived-mode mill-mode fundamental-mode "mill"
@@ -208,6 +232,9 @@
   (modify-syntax-entry ?- "w")
   (modify-syntax-entry ?_ "w")
   (modify-syntax-entry ?' "w")
+  (modify-syntax-entry ?@ "w")
+  (modify-syntax-entry ?# "w")
+  (modify-syntax-entry (string-to-char ";") "w")
 
   ;; truncate-lines
   (setq-local truncate-lines t)
