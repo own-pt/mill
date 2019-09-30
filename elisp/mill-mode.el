@@ -3,9 +3,20 @@
 ;; dependencies
 
 (require 'mill-flymake)
+(require 'seq)
 (require 'xref)
 
+;; customizable variable
+
+(defcustom mill--configuration-directory nil
+  "Path to directory where wordnet configuration files reside in, or `nil'."
+  :group 'mill
+  :type '(choice file (const nil)))
+
 ;; constants
+
+(defconst mill--frames-config-path
+  "frames.tsv")
 
 ;;; fontification
 
@@ -103,7 +114,7 @@
       (nreverse matches))))
 
 
-;; ident
+;; indentation
 
 (defconst default-tab-width 3)
 
@@ -121,12 +132,77 @@
 	    (setq cur-indent (current-indentation)))))
       (indent-line-to cur-indent))))
 
+;; interactive commands
+
+(defun mill--configuration-file (filename)
+  (let* ((current-directory-path (expand-file-name filename))
+	 (configuration-file-path (expand-file-name filename
+						    mill--configuration-directory)))
+
+    (cond
+     ((file-exists-p current-directory-path)
+      current-directory-path)
+     ((file-exists-p configuration-file-path)
+      configuration-file-path)
+     (t
+      (user-error
+       "Can't find configuration file %s, try setting variable `mill--configuration-directory'"
+       filename)))))
+
+
+(defun read-tsv (filepath)
+  (with-temp-buffer
+    (insert-file-contents filepath)
+    (goto-char (point-max))
+    (let ((result nil))
+      (while (not (bobp))
+	(let* ((line (thing-at-point 'line t))
+	       (fields (split-string line "\t" nil "[ \f\n\r\v]+")))
+	  (pcase fields
+	    (`(,singleton)
+	     (unless (or (equal (substring singleton 0 2) "--")
+			 (string-empty-p singleton))
+	       (push fields result)))
+	    (t (push fields result)))
+	  (forward-line -1)))
+      result)))
+
+
+(defalias 'mill--read-frames #'read-tsv "Read frames configuration file.")
+
+(defun mill-new-frame ()
+  "Create new frame at point."
+  (interactive)
+  (let* ((frames (mill--read-frames (mill--configuration-file mill--frames-config-path)))
+	 (choices (seq-map-indexed (lambda (elt idx) (cons (+ 97 idx) elt)) frames)))
+    (read-multiple-choice "Select frame: " choices)))
+
+
+(defun mill--at-wordsense-line? ()
+  (save-excursion
+    (goto-char (line-beginning-position))
+    (looking-at "w:")))
+
+
+(defun mill--new-wordsense-relation ())
+
+
+(defun mill--new-synset-relation ())
+
+
+(defun mill-new-relation ()
+  "Create new relation at point."
+  (interactive)
+  (if (mill--at-wordsense-line?)
+      (mill--new-wordsense-relation)
+    (mill--new-synset-relation)))
+
 ;;;###autoload
 (define-derived-mode mill-mode fundamental-mode "mill"
   "TODO: docstring"
 
   ;; syntax-table
-  ;;; word
+;;; word
   (modify-syntax-entry ?. "w")
   (modify-syntax-entry ?: "w")
   (modify-syntax-entry ?- "w")
