@@ -49,7 +49,9 @@ def go(graph):
         return string.replace(" ", "_").strip()
     #
     pt_lexfiles = set()
-    same_as_relations = graph.triples((None, SAME_AS,None))
+    # use list so that it is safe to add sameAs relations while we
+    # iterate over them
+    same_as_relations = list(graph.triples((None, SAME_AS,None)))
     # fill up info from English synset to Portuguese one
     for (en_synset, _, pt_synset) in same_as_relations:
         # not really needed:
@@ -61,8 +63,6 @@ def go(graph):
         pt_lexfiles.add(portuguese_lexfile)
         graph.add((pt_synset, LEXICOGRAPHER_FILE, portuguese_lexfile))
         # add reverse sameAs relation
-        ## FIXME: is it safe to add sameAs relations while we iterate
-        ## over them?
         graph.add((pt_synset, SAME_AS, en_synset))
         # everything else
         for (_, pred, obj) in graph.triples((en_synset, None, None)):
@@ -76,7 +76,7 @@ def go(graph):
         ## add dummy stuff if missing in Portuguese
         # gloss/definition
         if (pt_synset, WN30["gloss"], None) not in graph:
-            graph.add((pt_synset, WN30["gloss"], Literal("#;Missing_gloss")))
+            graph.add((pt_synset, WN30["gloss"], Literal("@_Missing_gloss")))
         # wordsenses and words
         wordsenses = list(graph.objects(pt_synset, CONTAINS_WORDSENSE))
         # if we don't force the generator the test below is moot
@@ -107,7 +107,7 @@ def go(graph):
             graph.add((pt_synset, CONTAINS_WORDSENSE, wordsense))
             word = WN30PT["word-{}".format(synset_uri)]
             graph.add((wordsense, WORD, word))
-            graph.add((word, LEXICAL_FORM, Literal("#;Missing_wordsense_{}".format(synset_uri))))
+            graph.add((word, LEXICAL_FORM, Literal("@_Missing_wordsense_{}".format(synset_uri))))
             graph.add((wordsense, LEXICAL_ID, Literal("0")))
     # add lexical ids and lexical forms if missing
     for lexfile in pt_lexfiles:

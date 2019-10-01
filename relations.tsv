@@ -1,4 +1,4 @@
-name	lexicographer file	text file	rdf	pos	domain	description
+name	lexicographer_file	text_file	rdf	pos	domain	description
 antonymOf	!	ant	antonymOf	n,v,a,r	word	Antonym
 memberHolonymOf	#m	hm	memberHolonymOf	n	synset	Member holonym
 partHolonymOf	#p	hp	partHolonymOf	n	synset	Part holonym

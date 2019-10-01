@@ -14,6 +14,11 @@
   :group 'mill
   :type '(choice file (const nil)))
 
+(defvar mill-relations '("sa" "su" "sb")
+  "These relations are used by `mill-display-related-synset' to
+  display the definition of a synset related to the one at
+  point.")
+
 ;; constants
 
 ;; (defconst mill--frames-file-name
@@ -30,12 +35,13 @@
   "Mill definition keywords.")
 
 (defconst mill--kwds-synset-rel
-  '("hm" "hp" "hs" "vg" "mm"
-    "mp" "ms" "sim" "entail"
-    "drf" "mt" "mr" "mu" "dt"
-    "dr" "du" "attr" "cause"
-    "hyper" "ihyper" "see"
-    "hypo" "ihypo" "sa" "su" "sb"))
+  (append mill-relations
+	  '("hm" "hp" "hs" "vg" "mm"
+	    "mp" "ms" "sim" "entail"
+	    "drf" "mt" "mr" "mu" "dt"
+	    "dr" "du" "attr" "cause"
+	    "hyper" "ihyper" "see"
+	    "hypo" "ihypo" "sa" "su" "sb")))
 
 (defconst mill--kwds-word-rel
   '("ant" "vg" "drf"
@@ -68,6 +74,7 @@
      nil
      (0 font-lock-constant-face))))
 
+
 (defalias 'mill-λ #'pcase-lambda)
 
 ;;  mill xref backend
@@ -77,8 +84,10 @@
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql xref-mill)))
   (if (or (eq (get-char-property (point) 'face) 'font-lock-function-name-face)
 	  (eq (get-char-property (point) 'face) 'font-lock-constant-face))
-      (let ((beg (previous-single-property-change (point) 'face nil (line-beginning-position)))
-	    (end (next-single-property-change (point) 'face nil (line-end-position))))
+      (let ((beg (previous-single-property-change (point) 'face nil
+						  (line-beginning-position)))
+	    (end (next-single-property-change (point) 'face nil
+					      (line-end-position))))
 	(buffer-substring beg end))))
 
 
@@ -97,8 +106,8 @@
 			(string-trim-right maybe-lex-name ":"))))
 	   (lex-id (unless (string-empty-p maybe-lex-id) maybe-lex-id)))
        (mill--collect-xref-matches lex-file
-				   lex-form
-				   lex-id)))))
+			       lex-form
+			       lex-id)))))
 
 
 (defun mill--collect-xref-matches (file lexical-form &optional lexical-id)
@@ -119,6 +128,42 @@
 	(forward-line 1)
 	(cl-incf line))
       (nreverse matches))))
+
+
+(defun mill-display-related-synset ()
+  "Display definition of related synset synset in another window.
+
+A related synset is a synset that relates to the synset at point
+by any of the relations in `mill-relations'."
+  (interactive)
+  (let* ((original-buffer (current-buffer))
+	 (original-window (get-buffer-window original-buffer))
+	 (original-point (point)))
+    (forward-char)     ;make it work when at first character of synset
+    (backward-sentence) 		;go to synset start
+    ;; search for related synset
+    (re-search-forward (format "^%s: *" "sa") (mill--paragraph-end-point) t 1)
+    ;; if successful, this command opens related synset in other
+    ;; window and selects it
+    (let ((identifier (xref-backend-identifier-at-point (mill--xref-backend))))
+      (unless identifier (user-error "No suitable identifier found"))
+      (xref-find-definitions-other-window identifier))
+    ;; this recenters it
+    (backward-sentence)
+    (recenter-top-bottom 0)
+    ;; re-select original window, recenter it, and put point at proper
+    ;; point
+    (select-window original-window)
+    (with-current-buffer original-buffer
+      (backward-sentence)
+      (recenter-top-bottom 0)
+      (goto-char original-point))))
+
+
+(defun mill--paragraph-end-point ()
+  (save-excursion
+    (forward-sentence)
+    (point)))
 
 
 ;; indentation
@@ -225,16 +270,15 @@
 (define-derived-mode mill-mode fundamental-mode "mill"
   "TODO: docstring"
 
-  ;; syntax-table
-;;; word
+  ;;; syntax-table
+  ;; word
   (modify-syntax-entry ?. "w")
   (modify-syntax-entry ?: "w")
   (modify-syntax-entry ?- "w")
   (modify-syntax-entry ?_ "w")
   (modify-syntax-entry ?' "w")
   (modify-syntax-entry ?@ "w")
-  (modify-syntax-entry ?# "w")
-  (modify-syntax-entry (string-to-char ";") "w")
+  
 
   ;; truncate-lines
   (setq-local truncate-lines t)

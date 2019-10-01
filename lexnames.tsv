@@ -1,4 +1,4 @@
-lexicographer_id	lexicographer_file	relative directory	description
+lexicographer_id	lexicographer_file	relative_directory	description
 0	adj.all	.	all heads of adjective clusters
 1	adj.pert	.	relational adjectives (pertainyms)
 2	adv.all	.	all adverbs
