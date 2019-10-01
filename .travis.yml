@@ -22,6 +22,12 @@ cache:
   - $HOME/.stack
   - $TRAVIS_BUILD_DIR/.stack-work
 
+
+# safelist
+branches:
+  only:
+  - master
+
 # The different configurations we want to test. We have BUILD=cabal which uses
 # cabal-install, and BUILD=stack which uses Stack. More documentation on each
 # of those below.
@@ -60,9 +66,9 @@ matrix:
   # - env: BUILD=cabal GHCVER=8.2.2 CABALVER=2.0 HAPPYVER=1.19.5 ALEXVER=3.1.7
   #   compiler: ": #GHC 8.2.2"
   #   addons: {apt: {packages: [cabal-install-2.0,ghc-8.2.2,happy-1.19.5,alex-3.1.7], sources: [hvr-ghc]}}
-  - env: BUILD=cabal GHCVER=8.4.4 CABALVER=2.2 HAPPYVER=1.19.5 ALEXVER=3.1.7
-    compiler: ": #GHC 8.4.4"
-    addons: {apt: {packages: [cabal-install-2.2,ghc-8.4.4,happy-1.19.5,alex-3.1.7], sources: [hvr-ghc]}}
+  # - env: build=cabal ghcver=8.4.4 cabalver=2.2 happyver=1.19.5 alexver=3.1.7
+  #   compiler: ": #ghc 8.4.4"
+  #   addons: {apt: {packages: [cabal-install-2.2,ghc-8.4.4,happy-1.19.5,alex-3.1.7], sources: [hvr-ghc]}}
   - env: BUILD=cabal GHCVER=8.6.5 CABALVER=2.4 HAPPYVER=1.19.5 ALEXVER=3.1.7
     compiler: ": #GHC 8.6.5"
     addons: {apt: {packages: [cabal-install-2.4,ghc-8.6.5,happy-1.19.5,alex-3.1.7], sources: [hvr-ghc]}}
@@ -99,13 +105,13 @@ matrix:
   #   compiler: ": #stack 8.0.2"
   #   addons: {apt: {packages: [libgmp-dev]}}
 
-  - env: BUILD=stack ARGS="--resolver lts-11"
-    compiler: ": #stack 8.2.2"
-    addons: {apt: {packages: [libgmp-dev]}}
+  # - env: BUILD=stack ARGS="--resolver lts-11"
+  #   compiler: ": #stack 8.2.2"
+  #   addons: {apt: {packages: [libgmp-dev]}}
 
-  - env: BUILD=stack ARGS="--resolver lts-12"
-    compiler: ": #stack 8.4.4"
-    addons: {apt: {packages: [libgmp-dev]}}
+  # - env: BUILD=stack ARGS="--resolver lts-12"
+  #   compiler: ": #stack 8.4.4"
+  #   addons: {apt: {packages: [libgmp-dev]}}
 
   - env: BUILD=stack ARGS="--resolver lts-13"
     compiler: ": #stack 8.6.5"
@@ -142,13 +148,13 @@ matrix:
   #   compiler: ": #stack 8.0.2 osx"
   #   os: osx
 
-  - env: BUILD=stack ARGS="--resolver lts-11"
-    compiler: ": #stack 8.2.2 osx"
-    os: osx
+  # - env: BUILD=stack ARGS="--resolver lts-11"
+  #   compiler: ": #stack 8.2.2 osx"
+  #   os: osx
 
-  - env: BUILD=stack ARGS="--resolver lts-12"
-    compiler: ": #stack 8.4.4 osx"
-    os: osx
+  # - env: BUILD=stack ARGS="--resolver lts-12"
+  #   compiler: ": #stack 8.4.4 osx"
+  #   os: osx
 
   - env: BUILD=stack ARGS="--resolver lts-13"
     compiler: ": #stack 8.6.5 osx"
