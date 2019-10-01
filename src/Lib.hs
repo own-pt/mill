@@ -69,7 +69,8 @@ readTSV :: Ord a => Text -> ([Text] -> Either String [(a, b)]) -> IO (Map a b)
 readTSV input readLine =
   case go input of
     ([], pairs) -> return . M.fromList $ concat pairs
-    (errors, _) -> mapM_ putStrLn errors >> return M.empty
+    (errors, _) -> mapM_ putStrLn errors
+                   >> error "There were errors in the configuration files"
   where
     go = partitionEithers
       . map readLine -- read contents
