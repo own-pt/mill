@@ -1,3 +1,4 @@
 .stack-work/
-wntext.cabal
+*.cabal
 *~
+*.prof
