@@ -8,11 +8,11 @@ copyright:           "2019 IBM Corporation"
 
 extra-source-files:
 - README
-- ChangeLog.md
+- CHANGELOG
 
 # Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
+synopsis:            Validate and export textual wordnet data
+category:            Data
 
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is

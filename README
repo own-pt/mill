@@ -31,11 +31,13 @@ TSV format.
 ** Python
 - install python 3
 - install the libraries in =requirements.txt=
+  : pip install -r requirements.txt
+
 
 ** Haskell
 - [[https://docs.haskellstack.org/en/stable/README/][install stack]]
 - run
-  : stack build --copy-bins
+  : stack install
 
 
 * Features
