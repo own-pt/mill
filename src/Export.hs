@@ -31,6 +31,10 @@ import Prelude hiding (lookup)
 uncurry3 :: (a -> b -> c -> d) -> (a,b,c) -> d
 uncurry3 f (a,b,c) = f a b c
 
+unUnderline :: WordSenseForm -> WordSenseForm
+-- | substitutes underlines for spaces in wordsense form
+unUnderline (WordSenseForm form) = WordSenseForm $ T.replace "_" " " form
+
 ---
 -- JSON/aeson
 synsetToJSON :: Map Text Text -> Map Text Int -> Synset Validated -> Value
@@ -50,7 +54,7 @@ synsetToJSON textToCanonicNames lexNamesToLexNum
     missingRelation name = "No relation with name " ++ show name ++ " found in relation.tsv"
     toWordSense wordSense@(WNWord (WordSenseIdentifier (_, lexForm, lexId)) wordFrames pointers)
       = object
-      [ "lexicalForm" .= lexForm
+      [ "lexicalForm" .= unUnderline lexForm
       , "lexicalId" .= lexId
       , "frames" .= wordFrames
       , "pointers" .= map (\(WordPointer name targetIdentifier) -> toRelation name targetIdentifier) pointers
