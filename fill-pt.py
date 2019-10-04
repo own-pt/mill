@@ -12,8 +12,10 @@ LEXICAL_FORM = WN30["lexicalForm"]
 FRAME = WN30["frame"]
 WORD = WN30["word"]
 LEXICAL_ID = WN30["lexicalId"]
+GLOSS = WN30["gloss"]
+EXAMPLE = WN30["example"]
 LEXICOGRAPHER_FILE = WN30["lexicographerFile"]
-FORBIDDEN_PREDICATE_LIST = [LEXICOGRAPHER_FILE, CONTAINS_WORDSENSE, SAME_AS, SKOS["inScheme"], WN30["gloss"], WN30["synsetId"], RDF["type"], WN30["example"]]
+FORBIDDEN_PREDICATE_LIST = [LEXICOGRAPHER_FILE, CONTAINS_WORDSENSE, SAME_AS, SKOS["inScheme"], GLOSS, WN30["synsetId"], RDF["type"], EXAMPLE]
 FORBIDDEN_PREDICATES = {pred: True for pred in FORBIDDEN_PREDICATE_LIST}
 
 
@@ -54,7 +56,7 @@ def go(graph):
     same_as_relations = list(graph.triples((None, SAME_AS,None)))
     # fill up info from English synset to Portuguese one
     for (en_synset, _, pt_synset) in same_as_relations:
-        # not really needed:
+        # not really needed, but could be useful:
         graph.add((pt_synset, WN30["lang"], Literal("pt")))
         graph.add((en_synset, WN30["lang"], Literal("en")))
         # lexfile
@@ -75,8 +77,12 @@ def go(graph):
                 graph.add((subj,pred,pt_synset))
         ## add dummy stuff if missing in Portuguese
         # gloss/definition
-        if (pt_synset, WN30["gloss"], None) not in graph:
-            graph.add((pt_synset, WN30["gloss"], Literal("@_Missing_gloss")))
+        if (pt_synset, GLOSS, None) not in graph:
+            # doing the split here or else the wn2text script will do
+            # it for us and then we would have spurious English
+            # examples in Portuguese
+            english_definition = graph.value(en_synset, GLOSS).split("; \"")[0].strip()
+            graph.add((pt_synset, GLOSS, Literal("@en_{}".format(english_definition))))
         # wordsenses and words
         wordsenses = list(graph.objects(pt_synset, CONTAINS_WORDSENSE))
         # if we don't force the generator the test below is moot
@@ -103,12 +109,14 @@ def go(graph):
                     graph.add((word, LEXICAL_FORM, lexical_form))
         else:
             (_, synset_uri) = split_uri(pt_synset)
-            wordsense = WN30PT["wordsense-{}.".format(synset_uri)]
-            graph.add((pt_synset, CONTAINS_WORDSENSE, wordsense))
-            word = WN30PT["word-{}".format(synset_uri)]
-            graph.add((wordsense, WORD, word))
-            graph.add((word, LEXICAL_FORM, Literal("@_Missing_wordsense_{}".format(synset_uri))))
-            graph.add((wordsense, LEXICAL_ID, Literal("0")))
+            english_wordsenses = graph.objects(en_synset, CONTAINS_WORDSENSE)
+            for ix, english_wordsense in enumerate(english_wordsenses):
+                wordsense = WN30PT["wordsense-{}-{}.".format(synset_uri, ix)]
+                graph.add((pt_synset, CONTAINS_WORDSENSE, wordsense))
+                word = WN30PT["word-{}-{}".format(synset_uri, ix)]
+                graph.add((wordsense, WORD, word))
+                english_lexical_form = graph.value(graph.value(english_wordsense, WORD), LEXICAL_FORM)
+                graph.add((word, LEXICAL_FORM, Literal("@en_{}".format(english_lexical_form))))
     # add lexical ids and lexical forms if missing
     for lexfile in pt_lexfiles:
         count = {}
