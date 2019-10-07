@@ -7,16 +7,22 @@ import Lib ( validateLexicographerFile
            , toWNDB )
 
 import Control.Monad.Reader (ReaderT(..))
-import Options.Applicative ( (<|>), argument, command, customExecParser, flag, fullDesc
-                           , help, helper, info, long, metavar, header, Parser
-                           , ParserInfo, prefs, progDesc, showHelpOnError, str, subparser )
+import Data.Text (Text)
+import qualified Data.Text as T
+import Options.Applicative ( (<|>), argument, command, customExecParser, eitherReader, flag, fullDesc
+                           , header, help, helper, info, long, metavar, option, Parser
+                           , ParserInfo, prefs, progDesc, showHelpOnError
+                           , ReadM, str, subparser, value
+                           )
 import System.Directory (doesDirectoryExist)
 import System.FilePath (takeDirectory)
 
+type OneLanguage = Maybe Text
+
 data ExportFormat = WNJSON | WNDB deriving (Show)
 
-data Command = Validate FilePath
-  | ExportCommand ExportFormat FilePath FilePath
+data Command = Validate OneLanguage FilePath
+  | ExportCommand OneLanguage ExportFormat FilePath FilePath
              deriving (Show)
 
 showHelpOnErrorExecParser :: ParserInfo a -> IO a
@@ -36,8 +42,20 @@ parseCommand = subparser $
    (info (helper <*> parseExportCommand)
    (fullDesc <> progDesc "Export lexicographer files"))
 
+parseOneLanguage :: ReadM OneLanguage
+parseOneLanguage = eitherReader go
+  where
+    go "" = Left "Must specify a valid WordNet name"
+    go lang = Right . Just . T.strip $ T.pack lang
+
+oneLanguage :: String -> Parser OneLanguage
+oneLanguage helpStr = option parseOneLanguage (long "one-lang" <> help helpStr <> value Nothing)
+  
 parseValidateCommand :: Parser Command
-parseValidateCommand = Validate <$> validateParser
+parseValidateCommand
+  = Validate
+  <$> oneLanguage "Ignore data from other wordnets in the validation"
+  <*> validateParser
   where
     validateParser = argument str
       (metavar "PATH" <> help "Validates one lexicographer file in case PATH is a file, else validates all lexicographer files in directory. Assumes lexnames.tsv is in the same PATH")
@@ -47,8 +65,10 @@ parseExportCommand = exportParser
   where
     jsonFlag = flag WNJSON WNJSON (long "json" <> help "Export to sensetion's JSON format [default]")
     wndbFlag = flag WNJSON WNDB   (long "wndb" <> help "Export to WNDB format")
-    exportParser =
-      ExportCommand <$> (jsonFlag <|> wndbFlag) <*> configDir <*> outputFile
+    exportParser
+      = ExportCommand
+      <$> oneLanguage "Don't export data from other wordnets"
+      <*> (jsonFlag <|> wndbFlag) <*> configDir <*> outputFile
     configDir = argument str
       (metavar "DIR" <> help "Directory where configuration files in")
     outputFile = argument str
@@ -67,16 +87,16 @@ main = do
     $ info (helper <*> parseCommand)
     (fullDesc <> progDesc millProgDesc <> header "wntext")
   case commandToRun of
-    Validate filepath -> do
+    Validate oneLang filepath -> do
       isDirectory <- doesDirectoryExist filepath
-      config <- readConfig $ if isDirectory then filepath else takeDirectory filepath
+      config <- readConfig oneLang $ if isDirectory then filepath else takeDirectory filepath
       runReaderT (if isDirectory
                   then validateLexicographerFiles
                   else validateLexicographerFile filepath)
         config
-    (ExportCommand WNJSON configDir outputFile) -> do
-      config <- readConfig configDir
+    (ExportCommand oneLang WNJSON configDir outputFile) -> do
+      config <- readConfig oneLang configDir
       runReaderT (lexicographerFilesJSON outputFile) config
-    (ExportCommand WNDB configDir outputFile) -> do
-      config <- readConfig configDir
+    (ExportCommand oneLang WNDB configDir outputFile) -> do
+      config <- readConfig oneLang configDir
       runReaderT (toWNDB outputFile) config

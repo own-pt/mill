@@ -11,9 +11,13 @@ module Validate
   , wordSenseKey
   ) where
 
-import Data
+import Data (Synset(..), Unvalidated, Validated, SourceValidation
+            ,WNWord(..), WNid(..),SynsetId(..), Validation(..), WordSenseForm(..), LexicalId(..)
+            ,SynsetRelation(..),WordPointer(..), WNValidation,WNError(..)
+            ,WordSenseId(..),SourceError(..),singleton,toSourceError,lexicographerFileIdToText)
 
 import Data.Bifunctor (bimap)
+import Data.Coerce (coerce)
 import Data.Either (either,rights)
 import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
@@ -63,14 +67,14 @@ checkIndexNoDuplicates index =
             $ NE.toList values
 
 wordSenseKey :: WNWord -> String
-wordSenseKey (WNWord (WordSenseIdentifier (lexicographerFileId, wordForm, lexicalId)) _ _)
-  = indexKey lexicographerFileId wordForm lexicalId
+wordSenseKey (WNWord wnWordId _ _)
+  = indexKey $ coerce wnWordId
 
-indexKey :: LexicographerFileId -> WordSenseForm -> LexicalId -> String
+indexKey :: WNid -> String
 -- this is NOT the sensekey
-indexKey  (LexicographerFileId (pos, lexname)) (WordSenseForm wordForm) (LexicalId lexicalId) =
+indexKey WNid{wnName, pos, lexname, lexForm = WordSenseForm wordForm, lexId = LexicalId lexicalId} =
   -- if changing this definition change WNDB export too
-  intercalate "\t" [T.unpack wordForm, show pos ++ T.unpack lexname, pad $ show lexicalId]
+  intercalate "\t" [T.unpack wnName, T.unpack wordForm, show pos ++ T.unpack lexname, pad $ show lexicalId]
   where
     pad x = replicate (2 - length x) '0' ++ x
 
@@ -113,12 +117,12 @@ checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
 checkSynsetRelationsTargets index = traverse checkSynsetRelation
   where
-    checkSynsetRelation synsetRelation@(SynsetRelation _ (SynsetIdentifier (lexFileId, wordForm, lexicalId))) =
+    checkSynsetRelation synsetRelation@(SynsetRelation _ synsetId) =
       if member targetSenseKey index
       then Success synsetRelation
       else Failure (MissingSynsetRelationTarget synsetRelation :| []) -- []
       where
-        targetSenseKey = indexKey lexFileId wordForm lexicalId
+        targetSenseKey = indexKey $ coerce synsetId
 
 validateSorted :: Ord a => [a] -> Validation (NonEmpty (NonEmpty a)) [a]
 -- maybe just sort input instead of picking some of the errors?
@@ -160,7 +164,7 @@ checkWordSenses index wordSenses
   where
     checkWordSensesOrderNoDuplicates
       = checkSortNoDuplicates UnsortedWordSenses DuplicateSynsetWords . map wordSenseLexicalForm $ NE.toList wordSenses
-    wordSenseLexicalForm (WNWord (WordSenseIdentifier (_,WordSenseForm lexicalForm,_)) _ _) = lexicalForm
+    wordSenseLexicalForm (WNWord (WordSenseId WNid{lexForm = WordSenseForm lexicalForm}) _ _) = lexicalForm
 
 checkWordSense :: Index a -> WNWord -> WNValidation WNWord
 checkWordSense index wordSense@(WNWord _ _ wordPointers)
@@ -176,13 +180,13 @@ checkWordSensePointersTargets :: Index a -> [WordPointer]
   -> WNValidation [WordPointer]
 checkWordSensePointersTargets index = traverse checkWordPointer
   where
-    checkWordPointer wordPointer@(WordPointer _ (WordSenseIdentifier (lexFileId, wordForm, lexicalId))) =
+    checkWordPointer wordPointer@(WordPointer _ wnWordId) =
       -- check pointer name too
       if member targetSenseKey index
       then Success wordPointer
       else Failure (MissingWordRelationTarget wordPointer :| []) -- []
       where
-        targetSenseKey = indexKey lexFileId wordForm lexicalId
+        targetSenseKey = indexKey $ coerce wnWordId
 
 validateSynsets :: Index (Synset Unvalidated)
   -> NonEmpty (Synset Unvalidated)

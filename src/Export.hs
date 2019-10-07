@@ -1,10 +1,10 @@
 {-# LANGUAGE StrictData #-}
 module Export where
 
-import Data ( LexicographerFileId(..)
-            , WordSenseIdentifier(..), SynsetIdentifier(..), Synset(..), Validated
+import Data ( WNid(..)
+            , WordSenseId(..), SynsetId(..), Synset(..), Validated
             , SynsetRelation(..), WNWord(..), WordPointer(..)
-            , lexicographerFileIdToText, senseKey, singleton, synsetId, synsetType
+            , idLexFile, lexicographerFileIdToText, senseKey, singleton, synsetId, synsetType
             , tshow
             , WNPOS(..), unsafeLookup, WordSenseForm(..), LexicalId(..) )
 import Validate (DupsIndex, Index, indexKey, lookupIndex)
@@ -35,7 +35,7 @@ uncurry3 f (a,b,c) = f a b c
 -- JSON/aeson
 synsetToJSON :: Map Text Text -> Map Text Int -> Synset Validated -> Value
 synsetToJSON textToCanonicNames lexNamesToLexNum
-  Synset{wordSenses = wordSenses@(WNWord headWordId@(WordSenseIdentifier (lexFileId@(LexicographerFileId (wnPOS, _)), _, _)) _ _:|_), ..}
+  Synset{wordSenses = wordSenses@(WNWord headWordId@(WordSenseId wnId@WNid{pos}) _ _:|_), ..}
   = object
   [ "id"         .= headWordId
   , "wordsenses" .= NE.map toWordSense wordSenses
@@ -48,21 +48,21 @@ synsetToJSON textToCanonicNames lexNamesToLexNum
   where
     toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "id" .= wnIdentifier]
     missingRelation name = "No relation with name " ++ show name ++ " found in relation.tsv"
-    toWordSense wordSense@(WNWord (WordSenseIdentifier (_, lexForm, lexId)) wordFrames pointers)
+    toWordSense wordSense@(WNWord (WordSenseId WNid{lexForm, lexId}) wordFrames pointers)
       = object
       [ "lexicalForm" .= lexForm
       , "lexicalId" .= lexId
       , "frames" .= wordFrames
       , "pointers" .= map (\(WordPointer name targetIdentifier) -> toRelation name targetIdentifier) pointers
-      , "senseKey" .= senseKey lexFileNum (synsetType wnPOS) maybeHeadSynset wordSense
+      , "senseKey" .= senseKey lexFileNum (synsetType pos) maybeHeadSynset wordSense
       ]
-    lexfileName  = lexicographerFileIdToText lexFileId
+    lexfileName  = lexicographerFileIdToText $ idLexFile wnId
     lexFileNum = unsafeLookup ("No lexfile with name "
                                ++ show lexfileName ++ "found in lexnames.tsv")
                  lexfileName lexNamesToLexNum
     isHeadRelation (SynsetRelation "sim" _) = True
     isHeadRelation _ = False
-    maybeHeadSynset = case wnPOS of
+    maybeHeadSynset = case pos of
       S -> find isHeadRelation relations
       _ -> Nothing
 
@@ -78,25 +78,25 @@ synsetsToSynsetJSONs textToCanonicNames lexNamesToLexNum synsets
 -- first we convert synsets to this structure which has all the info
 -- we need
 data DBSynset = DBSynset
-  { _id             :: (LexicographerFileId, WordSenseForm, LexicalId)
+  { _id                  :: WNid
   , lexicographerFileNum :: Int
   , pos                  :: WNPOS
   , wordSenses           :: NonEmpty (Text, Int)
   , gloss                :: Text
   , frames               :: [(Int,Int)]
-  , relations            :: [(Text, SynsetIdentifier, WNPOS, (Int, Int))]
+  , relations            :: [(Text, SynsetId, WNPOS, (Int, Int))]
   } deriving (Show,Eq)
 
 synsetToDB :: Map Text Text -> Map Text Int -> Index (Synset a) -> Synset Validated -> DBSynset
 synsetToDB relationsMap lexicographerMap index
-  Synset{lexicographerFileId, wordSenses = wordSenses@(WNWord (WordSenseIdentifier headId) _ _:|_), definition, examples, frames, relations} =
+  Synset{lexicographerFileId, wordSenses = wordSenses@(WNWord (WordSenseId headId@WNid{pos}) _ _:|_), definition, examples, frames, relations} =
   DBSynset { _id = headId
            , lexicographerFileNum = let lexname = lexicographerFileIdToText lexicographerFileId
                                     in unsafeLookup
                                        ("Missing lexicographer name " ++ T.unpack lexname ++ " in lexnames.tsv")
                                        lexname
                                        lexicographerMap
-           , pos = (\(LexicographerFileId (wnPos,_)) -> wnPos) lexicographerFileId
+           , pos = pos
            , wordSenses = NE.map toWord wordSenses -- FIXME: add syntactic marker
            , gloss = T.intercalate "; " (definition
                                          : map (\e -> T.cons '"' $ T.snoc e '"') examples)
@@ -106,32 +106,31 @@ synsetToDB relationsMap lexicographerMap index
                          ++ concatMap wordRelations (zip [1..] $ NE.toList wordSenses)
            }
   where
-    toWord (WNWord (WordSenseIdentifier (_,WordSenseForm form,LexicalId lexId)) _ _) = (form, lexId)
+    toWord (WNWord (WordSenseId WNid{lexForm = WordSenseForm form,lexId = LexicalId lexicalId}) _ _) = (form, lexicalId)
     synsetRelation (SynsetRelation relationName
-                    wnIdentifier@(SynsetIdentifier (LexicographerFileId (wnPos,_),_,_)))
+                    wnIdentifier@(SynsetId WNid{pos=wnPoS}))
       = ( unsafeLookup ("Missing relation " ++ T.unpack relationName ++ " in relations.tsv") relationName relationsMap
-        , wnIdentifier, wnPos, (0,0))
+        , wnIdentifier, wnPoS, (0,0))
     synsetFrame = (0,)
     toWordFrames (ix, WNWord _ wordFrames _) = map (ix,) wordFrames
     wordRelations (ix, WNWord _ _ wordPointers) =
       map (wordRelation ix) wordPointers
     wordRelation ix (WordPointer pointerName
-                       (WordSenseIdentifier wnIdentifier@(LexicographerFileId
-                                                          (wnPos,_), _, _))) =
+                       (WordSenseId wnId@WNid{pos=wnPoS})) =
       ( unsafeLookup ("Missing pointer " ++ T.unpack pointerName ++ "in relations.tsv") pointerName relationsMap
-      , synsetId . fromMaybe (error "Can't find key in index") $ lookupIndex (uncurry3 indexKey wnIdentifier) index
-      , wnPos
-      , (ix, getWordSenseIndex wnIdentifier))
-    getSynsetWords (lexFileId,wordSenseForm,lexId) =
-      let sensekey = indexKey lexFileId wordSenseForm lexId
+      , synsetId . fromMaybe (error "Can't find key in index") $ lookupIndex (indexKey wnId) index
+      , wnPoS
+      , (ix, getWordSenseIndex wnId))
+    getSynsetWords wnId =
+      let sensekey = indexKey wnId
       in case lookupIndex sensekey index of
         Just Synset{wordSenses = synsetWords} -> NE.toList synsetWords
         Nothing -> error $ "No synset corresponding to sense key " ++ sensekey
-    getWordSenseIndex wnIdentifier =
-      let synsetWords = getSynsetWords wnIdentifier
+    getWordSenseIndex wnId =
+      let synsetWords = getSynsetWords wnId
       in fromMaybe
-           (error $ "No wordsense corresponding to word sense " ++ show wnIdentifier)
-           $ findIndex (\(WNWord (WordSenseIdentifier wnId) _ _) -> wnId == wnIdentifier) synsetWords
+           (error $ "No wordsense corresponding to word sense " ++ show wnId)
+           $ findIndex (\(WNWord (WordSenseId synsetWnId) _ _) -> synsetWnId == wnId) synsetWords
 
 padText :: Int -> Text -> Text
 padText n x = T.append (T.replicate (n - T.length x) "0") x
@@ -139,8 +138,8 @@ padText n x = T.append (T.replicate (n - T.length x) "0") x
 padNum :: Int -> Int -> Text
 padNum n m = let x = T.pack $ show m in padText n x
 
-wnIdentifierToOffset :: Map String Int -> (LexicographerFileId, WordSenseForm, LexicalId) -> Text
-wnIdentifierToOffset offsetMap (lexFile, lexForm, lexId) = padNum 8 $ M.findWithDefault 0 (indexKey lexFile lexForm lexId) offsetMap
+wnIdentifierToOffset :: Map String Int -> WNid -> Text
+wnIdentifierToOffset offsetMap wnId = padNum 8 $ M.findWithDefault 0 (indexKey wnId) offsetMap
 
 showHumanPoS :: WNPOS -> Text
 -- shows S as "a" instead of "s"
@@ -172,7 +171,7 @@ showDBSynset offsetMap DBSynset{ _id, lexicographerFileNum, pos, wordSenses, fra
     offsetDoc = idOffset _id 
     paddedHex n h = padText n . T.pack $ showHex h ""
     synsetWord (wordForm, lexId) = T.unwords [T.replace " " "_" wordForm, T.pack $ showHex lexId ""]
-    synsetPointer (pointerSym, SynsetIdentifier targetId, targetPos, (sourceNum,targetNum))
+    synsetPointer (pointerSym, SynsetId targetId, targetPos, (sourceNum,targetNum))
       = T.unwords [ pointerSym, idOffset targetId, showHumanPoS targetPos
                   , paddedHex 2 sourceNum <> paddedHex 2 targetNum ]
     synsetFrame (frameNum, wordNum) = padNum 2 frameNum <> " " <> paddedHex 2 wordNum
@@ -188,9 +187,9 @@ calculateOffsets startOffset startOffsetMap relationsMap lexicographerMap index 
     getBytesize = B.length . encodeUtf8
     newlineSize = getBytesize newline
     go (offsetMap, offset) synset =
-      let dbSynset@DBSynset{_id = (lexFile, lexForm, lexId)} = synsetToDB relationsMap lexicographerMap index synset
+      let dbSynset@DBSynset{_id} = synsetToDB relationsMap lexicographerMap index synset
           increment = getBytesize $ showDBSynset M.empty dbSynset
-      in ( (M.insert (indexKey lexFile lexForm lexId) offset offsetMap, offset + increment + newlineSize)
+      in ( (M.insert (indexKey _id) offset offsetMap, offset + increment + newlineSize)
          , dbSynset
          )
 
@@ -230,11 +229,11 @@ showIndex wnPos relationsLexName offsetMap index indexIndex = foldlDescWithKey' 
         lemmaRelations = nub $ concatMap (wordRelations lemma) synsets
     wordRelations lemma Synset{relations, wordSenses} = concatMap lemmaPointers wordSenses ++ map (\(SynsetRelation name _) -> name) relations
       where
-        lemmaPointers (WNWord (WordSenseIdentifier (_,WordSenseForm wordForm,_)) _ wordPointers)
+        lemmaPointers (WNWord (WordSenseId WNid{lexForm=WordSenseForm wordForm}) _ wordPointers)
           = if foldCase wordForm == lemma then map pointerName wordPointers else []
     pointerName (WordPointer name _) = name
     toLexRelationName relationName = unsafeLookup ("Missing relation " ++ T.unpack relationName ++ " in relations.tsv") relationName relationsLexName
-    synsetOffset = wnIdentifierToOffset offsetMap . (\(SynsetIdentifier wnIdentifier) -> wnIdentifier) . synsetId
+    synsetOffset = wnIdentifierToOffset offsetMap . (\(SynsetId wnIdentifier) -> wnIdentifier) . synsetId
     toSynset (Left headKey)
       = fromMaybe (error $ "Missing key " ++ headKey ++ " in index") $ lookupIndex headKey index
     toSynset (Right synset) = synset

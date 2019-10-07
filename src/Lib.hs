@@ -13,7 +13,7 @@ import Data ( Synset(..), Unvalidated, Validated
             , Validation(..), SourceValidation, singleton
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
-            , showLongWNPOS, synsetPOS
+            , showLongWNPOS, synsetPOS, unsafeLookup
             , validate, validation )
 import Export ( DBSynset(..), calculateOffsets, makeIndexIndex, newline
               , showDBSynset, showIndex, synsetsToSynsetJSONs )
@@ -21,6 +21,7 @@ import Parse (parseLexicographer)
 import Validate ( makeIndex, Index, indexSynsets
                 , validateSynsets, checkIndexNoDuplicates )
 ----------------------------------
+import Debug.Trace (trace)
 import Control.Monad (unless,mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Bifunctor (Bifunctor(..))
@@ -42,24 +43,27 @@ import qualified Data.Text.Read as TR
 import Data.Traversable (mapAccumL)
 import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
-import Development.Shake.FilePath ((<.>), (-<.>), takeFileName)
+import Development.Shake.FilePath ((<.>), (-<.>), takeFileName, splitFileName, takeDirectory)
 import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryIfMissing
                         , doesDirectoryExist, withCurrentDirectory )
 import System.FilePath ((</>), normalise, equalFilePath)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
 
+
 -- | This datastructure contains the information found in the
 -- configuration files (currently only lexnames.tsv and relations.tsv
 -- are considered.)
 data Config = Config
-  { -- | maps lexicographer filenames to their numerical ids
-    lexnamesToId       :: Map Text Int
+  { -- | Only consider WordNet of name
+    oneLang :: Maybe Text
+  -- | contains the filepaths to the directory of each WordNet
+  , wnPaths :: Map Text FilePath
+  -- | maps lexicographer filenames to their numerical ids
+  , lexnamesToId       :: Map Text Int
   -- | maps relation names in text files to their canonical names
   , textToCanonicNames :: Map Text Text
   -- | maps canonic relation names to their possible domains
   , canonicToDomain    :: Map Text (NonEmpty WNObj, NonEmpty WNPOS)
-  -- | contains the filepaths to the files in the WordNet
-  , lexFilePaths       :: NonEmpty FilePath
   -- | maps relation names in text files to their (original)
   -- lexicographer file names/symbols
   , textToLexRelations :: Map Text Text
@@ -68,6 +72,7 @@ data Config = Config
   -- written to output formats
   , wnDir :: FilePath
   } deriving (Show,Eq)
+
 
 readTSV :: (Semigroup a, Ord a) => ([Text] -> Either String a) -> Text -> a
 readTSV readLine input =
@@ -85,8 +90,8 @@ readTSV readLine input =
     isComment [field] = T.take 2 field == "--"
     isComment _ = False
 
-readConfig :: FilePath -> IO Config
-readConfig configurationDir' = do
+readConfig :: Maybe Text -> FilePath -> IO Config
+readConfig oneLang configurationDir' = do
   configurationDir   <- canonicalizePath configurationDir'
   isDirectory        <- doesDirectoryExist configurationDir
   unless isDirectory (error "Filepath must be a directory")
@@ -94,30 +99,31 @@ readConfig configurationDir' = do
   where
     readTSVwith filePath reader = readTSV reader <$> TIO.readFile filePath
     go configurationDir = do
-      lexNamesInput      <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
-      relationsInput     <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
-      lexFilePaths       <- NE.fromList <$> mapM toLexFilePath lexNamesInput
-      let lexnamesToId = toMap toLexnamesToId lexNamesInput
+      lexNamesInput              <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
+      relationsInput             <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
+      (wnNames, wnRelativePaths) <- unzip <$> readTSVwith (configurationDir </> "wns.tsv") wnsReader
+      wnAbsolutePaths            <- mapM toAbsolutePath wnRelativePaths
+      let lexnamesToId       = toMap toLexnamesToId lexNamesInput
           textToCanonicNames = toMap toTextToCanonicName relationsInput
-          canonicToDomain = toMap toCanonicToDomain relationsInput
+          canonicToDomain    = toMap toCanonicToDomain relationsInput
           textToLexRelations = toMap toTextToLexRelations relationsInput
-      return $ Config {lexnamesToId, textToCanonicNames
-                      , lexFilePaths, canonicToDomain, textToLexRelations
-                      , wnDir = configurationDir
+          wnPaths            = toMap id $ zip wnNames wnAbsolutePaths
+      return $ Config { oneLang, lexnamesToId, textToCanonicNames
+                      , canonicToDomain, textToLexRelations
+                      , wnDir = configurationDir, wnPaths
                       }
         where
           toMap f = M.fromList . map f
-          toLexFilePath (lexFileName, _, relativeDir)
-            = withCurrentDirectory configurationDir
-                 (canonicalizePath $ T.unpack relativeDir </> T.unpack lexFileName)
-          toLexnamesToId (lexFileName, lexNameId, _) = (lexFileName, lexNameId)
+          toAbsolutePath wnPath
+            = withCurrentDirectory configurationDir (canonicalizePath $ T.unpack wnPath)
+          toLexnamesToId (lexFileName, lexNameId) = (lexFileName, lexNameId)
           toTextToCanonicName (canonicName,_,textName,_) = (textName, canonicName)
           toCanonicToDomain (canonicName, _,_, domain) = (canonicName, domain)
           toTextToLexRelations (_,lexName, textName,_) = (textName, lexName)
-          lexnamesReader [lexnameIdStr, lexicographerFile, relativeDir, _] =
+          lexnamesReader [lexnameIdStr, lexicographerFile, _] =
             case TR.decimal lexnameIdStr of
               Left err -> Left err
-              Right (lexnameId, "") -> Right [(lexicographerFile, lexnameId :: Int, relativeDir)]
+              Right (lexnameId, "") -> Right [(lexicographerFile, lexnameId :: Int)]
               Right (_, trailing) -> Left $ "Trailing garbage after " ++ T.unpack trailing
           lexnamesReader _ = Left "Wrong number of fields in lexnames.tsv"
           relationsReader [_,_,"_",_,_,_,_] = Right []
@@ -126,23 +132,40 @@ readConfig configurationDir' = do
                      , (readListField readWNObj domain, readListField readShortWNPOS pos))
                     ]
           relationsReader _ = Left "Wrong number of fields in relations.tsv"
+          wnsReader [wnName, wnPath] = Right [(wnName, wnPath)]
+          wnsReader _ = Left "Wrong number of fiels in wns.tsv"
           readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
                                                                  
 
 type App = ReaderT Config IO
 
-parseLexicographerFile :: FilePath -> App (SourceValidation (NonEmpty (Synset Unvalidated)))
-parseLexicographerFile filePath = do
+
+wnLexFiles :: App (NonEmpty (Text, FilePath))
+wnLexFiles = do
+  Config{wnPaths, oneLang, lexnamesToId} <- ask
+  case oneLang of
+    Just wnName -> return $ go lexnamesToId $ wnPath wnPaths wnName
+    Nothing     -> return . sconcat . NE.fromList . map (go lexnamesToId . wnPath wnPaths) $ M.keys wnPaths
+  where
+    wnPath wnPaths wnName = ( wnName
+                            , unsafeLookup ("No wordnet " ++ T.unpack wnName) wnName wnPaths)
+    go lexnamesToId (wnName, wnDirPath) = NE.fromList . map (\lexname -> (wnName, wnDirPath </> T.unpack lexname)) $ M.keys lexnamesToId
+
+wnFilePaths :: App (NonEmpty FilePath)
+wnFilePaths = NE.map snd <$> wnLexFiles
+
+parseLexicographerFile :: Text -> FilePath -> App (SourceValidation (NonEmpty (Synset Unvalidated)))
+parseLexicographerFile wnName filePath = do
   Config{textToCanonicNames, canonicToDomain} <- ask
   liftIO $ do
     content <- TIO.readFile $ normalise filePath
-    let result = parseLexicographer textToCanonicNames canonicToDomain filePath content
+    let result = parseLexicographer textToCanonicNames canonicToDomain wnName filePath content
     return result
 
-parseLexicographerFiles ::  NonEmpty FilePath
+parseLexicographerFiles :: NonEmpty (Text, FilePath)
   -> App (SourceValidation (NonEmpty (Synset Validated)))
 parseLexicographerFiles filePaths = do
-  lexFilesSynsetsOrErrors <- mapM parseLexicographerFile filePaths
+  lexFilesSynsetsOrErrors <- mapM (uncurry parseLexicographerFile) filePaths
   case sconcat lexFilesSynsetsOrErrors of
     Success synsets ->
       let validIndex = checkIndexNoDuplicates $ makeIndex synsets
@@ -151,8 +174,9 @@ parseLexicographerFiles filePaths = do
 
 lexicographerFilesJSON :: FilePath -> App ()
 lexicographerFilesJSON outputFile = do
-  Config{lexFilePaths, lexnamesToId, textToCanonicNames} <- ask
-  validationResults <- parseLexicographerFiles lexFilePaths
+  Config{lexnamesToId, textToCanonicNames} <- ask
+  lexFiles <- wnLexFiles
+  validationResults <- parseLexicographerFiles lexFiles
   case validationResults of
     Success synsets -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
                        in liftIO
@@ -168,10 +192,15 @@ lexicographerFilesJSON outputFile = do
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)
 
+buildFiles :: App (NonEmpty FilePath)
+buildFiles = build *> wnFilePaths
+
 getValidated :: App (SourceValidation (Index (Synset Unvalidated), NonEmpty (Synset Validated)))
+-- | validate all lexicographer files and return the synset index and
+-- a nonempty list of their validated synsets
 getValidated = do
-  _ <- build
-  Config{lexFilePaths, wnDir} <- ask
+  lexFilePaths <- buildFiles
+  Config{wnDir} <- ask
   -- we first read the indices from the cache and sequence them; we
   -- can't merge them now because we need to validate the synsets from
   -- each file as a unit, or else we get spurious sort errors
@@ -197,9 +226,9 @@ validateLexicographerFile :: FilePath -> App ()
 -- | Validates lexicographer file without semantically validating all
 -- other files (as long as they are syntactically valid)
 validateLexicographerFile filePath = do
-  normalFilePath   <- liftIO $ canonicalizePath filePath
-  _ <- build
-  Config{lexFilePaths, wnDir} <- ask
+  normalFilePath <- liftIO $ canonicalizePath filePath
+  lexFilePaths <- buildFiles
+  Config{wnDir} <- ask
   liftIO $
     case NE.partition (equalFilePath normalFilePath) lexFilePaths of
       ([_], otherFilePaths) -> liftIO $ go wnDir normalFilePath otherFilePaths
@@ -249,25 +278,32 @@ readCachedIndex wnDir lexFilePath = do
 -- cache
 build :: App ()
 build = do
-  config@Config{wnDir, lexFilePaths = lexFilePaths} <- ask
-  let cachePath = wnDir </> ".cache"
-  liftIO . shake shakeOptions{ shakeFiles=cachePath, shakeThreads=0 }
+  config@Config{wnDir} <- ask
+  lexFiles <- wnLexFiles
+  let shakeDir = wnDir </> ".cache"
+  liftIO . shake shakeOptions{ shakeFiles=shakeDir, shakeThreads=0 }
     $ do
-    want . map (flip (<.>) "index" . (</>) cachePath . takeFileName)
-      $ NE.toList lexFilePaths
-    cachePath </> "*.index" %> \out -> do
-        let lexFileName = takeFileName out -<.> ""
-            maybeLexFilePath = find ((==) lexFileName . takeFileName) lexFilePaths
+    -- targets
+    want . map cachePath $ map snd $ NE.toList lexFiles
+    -- rules
+    "//.cache/*.index" %> \out -> do
+        let (dirPath, fileName) = splitFileName $ trace out out -<.> ""
+            lexFilePath         = let dir = takeDirectory $ takeDirectory dirPath
+                                  in dir </> fileName
+            maybeLexFilePath = find ((==) lexFilePath . snd) lexFiles
         case maybeLexFilePath of
-          Nothing -> fail $ lexFileName ++ " not in lexnames.tsv"
-          Just lexFilePath -> do
+          Nothing -> fail $ lexFilePath ++ " not in lexnames.tsv"
+          Just (wnName, _) -> do
             need [lexFilePath]
-            liftIO $ runReaderT (cacheFileIndex lexFilePath out) config
+            liftIO $ runReaderT (cacheFileIndex wnName lexFilePath out) config
    where
-     cacheFileIndex :: FilePath -> FilePath -> App ()
-     cacheFileIndex lexFilePath outFilePath = do
-       result <- parseLexicographerFile lexFilePath
-       let validIndex = bimap id makeIndex result
+     cachePath path =
+       let (dirPath, fileName) = splitFileName path
+       in dirPath </> ".cache" </> fileName <.> "index"
+     cacheFileIndex :: Text -> FilePath -> FilePath -> App ()
+     cacheFileIndex wnName lexFilePath outFilePath = do
+       result <- parseLexicographerFile wnName lexFilePath
+       let validIndex = bimap id makeIndex result -- valid index has no duplicates
        liftIO . encodeFile outFilePath
          $ validate checkIndexNoDuplicates validIndex
 
