@@ -11,13 +11,16 @@ SYNTACTIC_MARKER = WN30["syntacticMarker"]
 LEXICAL_FORM = WN30["lexicalForm"]
 FRAME = WN30["frame"]
 WORD = WN30["word"]
+LANG = WN30["lang"]
 LEXICAL_ID = WN30["lexicalId"]
 GLOSS = WN30["gloss"]
 EXAMPLE = WN30["example"]
 LEXICOGRAPHER_FILE = WN30["lexicographerFile"]
-FORBIDDEN_PREDICATE_LIST = [LEXICOGRAPHER_FILE, CONTAINS_WORDSENSE, SAME_AS, SKOS["inScheme"], GLOSS, WN30["synsetId"], RDF["type"], EXAMPLE]
+FORBIDDEN_PREDICATE_LIST = [LANG, CONTAINS_WORDSENSE, SAME_AS, SKOS["inScheme"], GLOSS, WN30["synsetId"], RDF["type"], EXAMPLE]
 FORBIDDEN_PREDICATES = {pred: True for pred in FORBIDDEN_PREDICATE_LIST}
 
+PT = Literal("pt")
+EN = Literal("en")
 
 input_file = "own-all.nt"
 rdf_file_format = 'nt'
@@ -40,8 +43,6 @@ def go(graph):
         return graph.value(en_synset,SAME_AS,default=False,any=False)
     def synset_minimal_wordsense(synset):
         wordsenses = graph.objects(synset,CONTAINS_WORDSENSE)
-        if not wordsenses:
-            print(synset)
         word_forms = list(map(lambda ws: graph.value(graph.value(ws, WORD), LEXICAL_FORM), wordsenses))
         if None in word_forms or not word_forms:
             print(synset)
@@ -50,22 +51,13 @@ def go(graph):
     def handle_spaces(string):
         return string.replace(" ", "_").strip()
     #
-    pt_lexfiles = set()
     # use list so that it is safe to add sameAs relations while we
     # iterate over them
-    same_as_relations = list(graph.triples((None, SAME_AS,None)))
+    same_as_relations = list(graph.triples((None, SAME_AS, None)))
     # fill up info from English synset to Portuguese one
     for (en_synset, _, pt_synset) in same_as_relations:
-        # not really needed, but could be useful:
-        graph.add((pt_synset, WN30["lang"], Literal("pt")))
-        graph.add((en_synset, WN30["lang"], Literal("en")))
-        # lexfile
-        english_lexfile = graph.value(en_synset, LEXICOGRAPHER_FILE)
-        portuguese_lexfile = Literal("{}@pt".format(english_lexfile))
-        pt_lexfiles.add(portuguese_lexfile)
-        graph.add((pt_synset, LEXICOGRAPHER_FILE, portuguese_lexfile))
-        # add reverse sameAs relation
-        graph.add((pt_synset, SAME_AS, en_synset))
+        graph.add((pt_synset, LANG, PT))
+        graph.add((en_synset, LANG, EN))
         # everything else
         for (_, pred, obj) in graph.triples((en_synset, None, None)):
             if pred not in FORBIDDEN_PREDICATES:
@@ -118,9 +110,10 @@ def go(graph):
                 english_lexical_form = graph.value(graph.value(english_wordsense, WORD), LEXICAL_FORM)
                 graph.add((word, LEXICAL_FORM, Literal("@en_{}".format(english_lexical_form))))
     # add lexical ids and lexical forms if missing
-    for lexfile in pt_lexfiles:
+    for lexfile in set(graph.objects(predicate=LEXICOGRAPHER_FILE)):
         count = {}
-        synsets = graph.subjects(LEXICOGRAPHER_FILE, lexfile)
+        all_synsets = graph.subjects(predicate=LEXICOGRAPHER_FILE, object=lexfile)
+        synsets = filter(lambda s: graph.value(s,LANG) == PT, all_synsets)
         for synset in sorted(synsets, key=synset_minimal_wordsense):
             for wordsense in graph.objects(synset,CONTAINS_WORDSENSE):
                 word = graph.value(wordsense, WORD)
@@ -129,6 +122,9 @@ def go(graph):
                     lexical_id = count.get(lexical_form, 0)
                     graph.add((wordsense, LEXICAL_ID, Literal("{}".format(lexical_id))))
                     count[lexical_form] = lexical_id + 1
+    for en_synset, pt_synset in graph.subject_objects(SAME_AS):
+        graph.remove((en_synset,SAME_AS,pt_synset))
+        graph.add((pt_synset,SAME_AS, en_synset))
     return None
 
 

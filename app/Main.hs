@@ -12,7 +12,7 @@ import qualified Data.Text as T
 import Options.Applicative ( (<|>), argument, command, customExecParser, eitherReader, flag, fullDesc
                            , header, help, helper, info, long, metavar, option, Parser
                            , ParserInfo, prefs, progDesc, showHelpOnError
-                           , ReadM, str, subparser, value
+                           , ReadM, short, str, subparser, value
                            )
 import System.Directory (doesDirectoryExist)
 import System.FilePath (takeDirectory)
@@ -49,7 +49,8 @@ parseOneLanguage = eitherReader go
     go lang = Right . Just . T.strip $ T.pack lang
 
 oneLanguage :: String -> Parser OneLanguage
-oneLanguage helpStr = option parseOneLanguage (long "one-lang" <> help helpStr <> value Nothing)
+oneLanguage helpStr = option parseOneLanguage
+  (metavar "LANG" <> short 'l' <> long "lang" <> help helpStr <> value Nothing)
   
 parseValidateCommand :: Parser Command
 parseValidateCommand
@@ -70,7 +71,7 @@ parseExportCommand = exportParser
       <$> oneLanguage "Don't export data from other wordnets"
       <*> (jsonFlag <|> wndbFlag) <*> configDir <*> outputFile
     configDir = argument str
-      (metavar "DIR" <> help "Directory where configuration files in")
+      (metavar "DIR" <> help "Directory where configuration files are in")
     outputFile = argument str
       (metavar "FILE" <> help "Output file path")
 
@@ -97,6 +98,9 @@ main = do
     (ExportCommand oneLang WNJSON configDir outputFile) -> do
       config <- readConfig oneLang configDir
       runReaderT (lexicographerFilesJSON outputFile) config
-    (ExportCommand oneLang WNDB configDir outputFile) -> do
-      config <- readConfig oneLang configDir
-      runReaderT (toWNDB outputFile) config
+    (ExportCommand oneLang WNDB configDir outputFile) ->
+      case oneLang of
+        Nothing -> error "You must specify a language for WNDB export"
+        Just _ -> do
+          config <- readConfig oneLang configDir
+          runReaderT (toWNDB outputFile) config

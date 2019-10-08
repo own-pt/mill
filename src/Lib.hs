@@ -18,10 +18,10 @@ import Data ( Synset(..), Unvalidated, Validated
 import Export ( DBSynset(..), calculateOffsets, makeIndexIndex, newline
               , showDBSynset, showIndex, synsetsToSynsetJSONs )
 import Parse (parseLexicographer)
-import Validate ( makeIndex, Index, indexSynsets
+import Validate ( makeIndex, Index, indexSynsets, oneLangIndex
                 , validateSynsets, checkIndexNoDuplicates )
 ----------------------------------
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
 import Control.Monad (unless,mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Bifunctor (Bifunctor(..))
@@ -43,7 +43,7 @@ import qualified Data.Text.Read as TR
 import Data.Traversable (mapAccumL)
 import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
-import Development.Shake.FilePath ((<.>), (-<.>), takeFileName, splitFileName, takeDirectory)
+import Development.Shake.FilePath ((<.>), (-<.>), splitFileName, takeDirectory)
 import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryIfMissing
                         , doesDirectoryExist, withCurrentDirectory )
 import System.FilePath ((</>), normalise, equalFilePath)
@@ -148,7 +148,8 @@ wnLexFiles = do
     Nothing     -> return . sconcat . NE.fromList . map (go lexnamesToId . wnPath wnPaths) $ M.keys wnPaths
   where
     wnPath wnPaths wnName = ( wnName
-                            , unsafeLookup ("No wordnet " ++ T.unpack wnName) wnName wnPaths)
+                            , unsafeLookup ("No wordnet named " ++ T.unpack wnName) wnName wnPaths
+                            )
     go lexnamesToId (wnName, wnDirPath) = NE.fromList . map (\lexname -> (wnName, wnDirPath </> T.unpack lexname)) $ M.keys lexnamesToId
 
 wnFilePaths :: App (NonEmpty FilePath)
@@ -175,13 +176,12 @@ parseLexicographerFiles filePaths = do
 lexicographerFilesJSON :: FilePath -> App ()
 lexicographerFilesJSON outputFile = do
   Config{lexnamesToId, textToCanonicNames} <- ask
-  lexFiles <- wnLexFiles
-  validationResults <- parseLexicographerFiles lexFiles
-  case validationResults of
-    Success synsets -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
-                       in liftIO
-                          $ withFile outputFile WriteMode (`write` jsonBuilder) 
+  result <- getValidated
+  case result of
     Failure errors -> liftIO $ prettyPrintList errors
+    Success (_, synsets) -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
+                            in liftIO
+                               $ withFile outputFile WriteMode (`write` jsonBuilder) 
   where
     write handle builder = do
       _ <- handle `hSetBinaryMode` True
@@ -200,12 +200,15 @@ getValidated :: App (SourceValidation (Index (Synset Unvalidated), NonEmpty (Syn
 -- a nonempty list of their validated synsets
 getValidated = do
   lexFilePaths <- buildFiles
-  Config{wnDir} <- ask
+  Config{oneLang} <- ask
   -- we first read the indices from the cache and sequence them; we
   -- can't merge them now because we need to validate the synsets from
   -- each file as a unit, or else we get spurious sort errors
-  validationIndices <- liftIO $ sequenceA <$> mapM (readCachedIndex wnDir) lexFilePaths
-  let validationIndex = bimap id sconcat validationIndices
+  validationIndices' <- liftIO $ sequenceA <$> mapM readCachedIndex lexFilePaths
+  let -- remove interWN relations if OneLang
+    validationIndices = bimap id (NE.map $ oneLangIndex oneLang) validationIndices'
+    -- join indices
+    validationIndex   = bimap id sconcat validationIndices
   case (validationIndex, validationIndices) of
     (Failure parseErrors, _)
       -> return $ Failure parseErrors
@@ -224,21 +227,20 @@ getValidated = do
 
 validateLexicographerFile :: FilePath -> App ()
 -- | Validates lexicographer file without semantically validating all
--- other files (as long as they are syntactically valid)
+-- other files (they must be syntactically valid, though)
 validateLexicographerFile filePath = do
   normalFilePath <- liftIO $ canonicalizePath filePath
   lexFilePaths <- buildFiles
-  Config{wnDir} <- ask
   liftIO $
     case NE.partition (equalFilePath normalFilePath) lexFilePaths of
-      ([_], otherFilePaths) -> liftIO $ go wnDir normalFilePath otherFilePaths
+      ([_], otherFilePaths) -> liftIO $ go normalFilePath otherFilePaths
       ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
       _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
-    go wnDir fileToValidate lexFilePaths = do
-      validationTargetFileIndex <- readCachedIndex wnDir fileToValidate
+    go fileToValidate lexFilePaths = do
+      validationTargetFileIndex <- readCachedIndex fileToValidate
       -- FIXME: use unionWith instead of sconcat?
-      validationOtherFileIndices <- sequenceA <$> mapM (readCachedIndex wnDir) lexFilePaths
+      validationOtherFileIndices <- sequenceA <$> mapM readCachedIndex lexFilePaths
       case (validationOtherFileIndices, validationTargetFileIndex) of
         (Failure parseErrors, Success _)
           -> prettyPrintList $ toSingleError parseErrors
@@ -264,14 +266,13 @@ validateLexicographerFile filePath = do
 validateLexicographerFiles :: App ()
 validateLexicographerFiles = do
   ioAction <- validation prettyPrintList (return . const ()) <$> getValidated
-  _ <- liftIO ioAction
-  return ()
+  liftIO ioAction
 
-readCachedIndex :: FilePath -> FilePath
+readCachedIndex :: FilePath
   -> IO (SourceValidation (Index (Synset Unvalidated)))
-readCachedIndex wnDir lexFilePath = do
-  let filePath = takeFileName lexFilePath
-      indexPath = wnDir </> ".cache" </> filePath <.> "index"
+readCachedIndex lexFilePath = do
+  let (dirPath, filePath) = splitFileName lexFilePath
+      indexPath = dirPath </> ".cache" </> filePath <.> "index"
   decodeFile indexPath
 
 ---
@@ -284,10 +285,10 @@ build = do
   liftIO . shake shakeOptions{ shakeFiles=shakeDir, shakeThreads=0 }
     $ do
     -- targets
-    want . map cachePath $ map snd $ NE.toList lexFiles
+    want . map (cachePath . snd) $ NE.toList lexFiles
     -- rules
     "//.cache/*.index" %> \out -> do
-        let (dirPath, fileName) = splitFileName $ trace out out -<.> ""
+        let (dirPath, fileName) = splitFileName $ out -<.> ""
             lexFilePath         = let dir = takeDirectory $ takeDirectory dirPath
                                   in dir </> fileName
             maybeLexFilePath = find ((==) lexFilePath . snd) lexFiles
@@ -303,7 +304,8 @@ build = do
      cacheFileIndex :: Text -> FilePath -> FilePath -> App ()
      cacheFileIndex wnName lexFilePath outFilePath = do
        result <- parseLexicographerFile wnName lexFilePath
-       let validIndex = bimap id makeIndex result -- valid index has no duplicates
+       let validIndex = bimap id makeIndex result
+       -- valid index has no duplicates, but may have invalid synsets
        liftIO . encodeFile outFilePath
          $ validate checkIndexNoDuplicates validIndex
 

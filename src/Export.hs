@@ -203,7 +203,7 @@ makeIndexIndex = foldlWithKey' go empty
   where
     go :: String -> Either String a -> DupsIndex a -> DupsIndex a
     go key value = insertWith' (<>) (newKey key) $ singleton value
-    newKey key = let (lemma, rest) = break (=='\t') key
+    newKey key = let (lemma, rest) = break (=='\t') . tail $ dropWhile (/='\t') key
                      pos = read . take 1 $ drop 1 rest
                  in concat [show (if pos == S then A else pos), "\t", foldCase lemma]
 

@@ -6,6 +6,7 @@ module Validate
   , indexSynsets
   , lookupIndex
   , makeIndex
+  , oneLangIndex
   , Index
   , indexKey
   , wordSenseKey
@@ -22,9 +23,11 @@ import Data.Either (either,rights)
 import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
+import Data.Text (Text)
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
-import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member,toAscList,mapAccumWithKey',lookup)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member
+                                  ,toAscList,map',mapAccumWithKey',lookup)
 import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
@@ -74,7 +77,11 @@ indexKey :: WNid -> String
 -- this is NOT the sensekey
 indexKey WNid{wnName, pos, lexname, lexForm = WordSenseForm wordForm, lexId = LexicalId lexicalId} =
   -- if changing this definition change WNDB export too
-  intercalate "\t" [T.unpack wnName, T.unpack wordForm, show pos ++ T.unpack lexname, pad $ show lexicalId]
+  intercalate "\t" [ T.unpack wnName
+                   , T.unpack wordForm
+                   , show pos ++ T.unpack lexname
+                   , pad $ show lexicalId
+                   ]
   where
     pad x = replicate (2 - length x) '0' ++ x
 
@@ -120,7 +127,7 @@ checkSynsetRelationsTargets index = traverse checkSynsetRelation
     checkSynsetRelation synsetRelation@(SynsetRelation _ synsetId) =
       if member targetSenseKey index
       then Success synsetRelation
-      else Failure (MissingSynsetRelationTarget synsetRelation :| []) -- []
+      else Failure (MissingSynsetRelationTarget synsetRelation :| [])
       where
         targetSenseKey = indexKey $ coerce synsetId
 
@@ -181,7 +188,6 @@ checkWordSensePointersTargets :: Index a -> [WordPointer]
 checkWordSensePointersTargets index = traverse checkWordPointer
   where
     checkWordPointer wordPointer@(WordPointer _ wnWordId) =
-      -- check pointer name too
       if member targetSenseKey index
       then Success wordPointer
       else Failure (MissingWordRelationTarget wordPointer :| []) -- []
@@ -210,6 +216,23 @@ validateSynsets index (firstSynset:|synsets) =
 
 indexSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
 indexSynsets = concatMap (either (const []) (:[]) . snd) . toAscList
+
+oneLangIndex :: Maybe Text -> Index (Synset Unvalidated) -> Index (Synset Unvalidated)
+-- | Remove from the index all relations pointing to synsets in other
+-- WNs
+oneLangIndex Nothing = id
+oneLangIndex (Just lang)
+  = map' go
+  where
+    go (Left headKey) = Left headKey
+    go (Right s@Synset{wordSenses,relations})
+      = Right s{relations = filter oneLang relations, wordSenses = NE.map oneLangWordSense wordSenses}
+      where
+        oneLang (SynsetRelation _ (SynsetId WNid{wnName})) = wnName == lang
+        oneLangWordSense (WNWord wID fs pointers)
+          = WNWord wID fs
+          $ filter oneLangPointer pointers
+        oneLangPointer (WordPointer _ (WordSenseId WNid{wnName})) = wnName == lang
 
 ---
 

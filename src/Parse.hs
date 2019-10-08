@@ -17,7 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
 import Text.Megaparsec hiding (State)
-import Text.Megaparsec.Char (char, string, eol)
+import Text.Megaparsec.Char (char, eol)
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 import qualified Data.Set as S
@@ -63,21 +63,21 @@ parseLexicographer textToCanonicNames canonicToDomain wnName fileName inputText 
 
 lexicographerIdP :: Monad m => Text -> ParsecT Void Text m LexicographerFileId
 lexicographerIdP defaultWN = do
+  wnName <- wnNameP
   maybePos <- posP
-  _        <- char '.'
-  lexname  <- lexnameP
-  wnName   <- wnNameP
-  _        <- spaceConsumer
+  lexname  <- char '.' *> lexnameP
   case maybePos of
     Nothing  -> failure Nothing (S.fromList
-                                 $ map toErrorItem ["noun", "verb", "adj", "adjs", "adv"])
+                                  $ map toErrorItem ["noun", "verb", "adj", "adjs", "adv"])
     Just pos -> return $ LexicographerFileId{pos, lexname, wnName}
   where
     toErrorItem = Label . NE.fromList
     posP     = readLongWNPOS <$> takeWhile1P Nothing (/= '.')
     lexnameP = takeWhile1P Nothing (`notElem` [' ','\t',':','\n', '@'])
                  <?> "Lexicographer file name (must not contain whitespace or a colon or an at symbol)"
-    wnNameP  = option defaultWN (char '@' *> takeWhile1P Nothing (`notElem` [' ', '\t',':','\n']) <?> "WordNet name")
+    wnNameP  = option defaultWN
+               (char '@' *> takeWhile1P Nothing (`notElem` [' ', '\t',':','\n']) <* char ':'
+               <?> "WordNet name")
 
 lexicographerFile :: Parser (NonEmpty RawSynset)
 lexicographerFile = do
@@ -187,9 +187,7 @@ identifier =
   where
     lexicographerIdentifier = do
       wnName <- wnNameR
-      lexId <- lexicographerIdP wnName
-      _ <- string ":"
-      return lexId
+      lexicographerIdP wnName <* char ':'
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go

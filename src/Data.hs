@@ -271,7 +271,7 @@ instance Pretty WNPOS where
 
 instance Pretty LexicographerFileId where
   pretty LexicographerFileId{pos, lexname, wnName} =
-    pretty pos <> dot <> pretty lexname <> "@" <> pretty wnName
+    "@" <> pretty wnName <> ":" <> pretty pos <> dot <> pretty lexname
 
 prettyRelation :: Text -> WNid -> Doc ann
 prettyRelation name wnId = pretty name <> "»" <> pretty wnId
