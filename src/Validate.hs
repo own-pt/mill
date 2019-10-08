@@ -219,7 +219,9 @@ indexSynsets = concatMap (either (const []) (:[]) . snd) . toAscList
 
 oneLangIndex :: Maybe Text -> Index (Synset Unvalidated) -> Index (Synset Unvalidated)
 -- | Remove from the index all relations pointing to synsets in other
--- WNs
+-- WNs; the index should not have any synsets from other WNs. in
+-- normal operation this doesn't happen because these synsets do not
+-- even get read when one language is specified
 oneLangIndex Nothing = id
 oneLangIndex (Just lang)
   = map' go

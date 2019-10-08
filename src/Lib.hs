@@ -204,11 +204,8 @@ getValidated = do
   -- we first read the indices from the cache and sequence them; we
   -- can't merge them now because we need to validate the synsets from
   -- each file as a unit, or else we get spurious sort errors
-  validationIndices' <- liftIO $ sequenceA <$> mapM readCachedIndex lexFilePaths
-  let -- remove interWN relations if OneLang
-    validationIndices = bimap id (NE.map $ oneLangIndex oneLang) validationIndices'
-    -- join indices
-    validationIndex   = bimap id sconcat validationIndices
+  validationIndices <- liftIO $ sequenceA <$> mapM (readCachedFileIndex oneLang) lexFilePaths
+  let validationIndex   = bimap id sconcat validationIndices
   case (validationIndex, validationIndices) of
     (Failure parseErrors, _)
       -> return $ Failure parseErrors
@@ -229,18 +226,20 @@ validateLexicographerFile :: FilePath -> App ()
 -- | Validates lexicographer file without semantically validating all
 -- other files (they must be syntactically valid, though)
 validateLexicographerFile filePath = do
+  Config{oneLang} <- ask
   normalFilePath <- liftIO $ canonicalizePath filePath
   lexFilePaths <- buildFiles
   liftIO $
     case NE.partition (equalFilePath normalFilePath) lexFilePaths of
-      ([_], otherFilePaths) -> liftIO $ go normalFilePath otherFilePaths
+      ([_], otherFilePaths) -> liftIO $ go oneLang normalFilePath otherFilePaths
       ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
       _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
-    go fileToValidate lexFilePaths = do
-      validationTargetFileIndex <- readCachedIndex fileToValidate
+    go oneLang fileToValidate lexFilePaths = do
+      validationTargetFileIndex <- readCachedFileIndex oneLang fileToValidate
       -- FIXME: use unionWith instead of sconcat?
-      validationOtherFileIndices <- sequenceA <$> mapM readCachedIndex lexFilePaths
+      validationOtherFileIndices <- sequenceA
+                                 <$> mapM (readCachedFileIndex oneLang) lexFilePaths
       case (validationOtherFileIndices, validationTargetFileIndex) of
         (Failure parseErrors, Success _)
           -> prettyPrintList $ toSingleError parseErrors
@@ -268,12 +267,16 @@ validateLexicographerFiles = do
   ioAction <- validation prettyPrintList (return . const ()) <$> getValidated
   liftIO ioAction
 
-readCachedIndex :: FilePath
+readCachedFileIndex :: Maybe Text -> FilePath
   -> IO (SourceValidation (Index (Synset Unvalidated)))
-readCachedIndex lexFilePath = do
+-- | reads lexFile cached index at lexFilePath; if oneLang is not
+-- Nothing, removes relations which point to targets who are part of
+-- other WNs
+readCachedFileIndex oneLang lexFilePath = do
   let (dirPath, filePath) = splitFileName lexFilePath
       indexPath = dirPath </> ".cache" </> filePath <.> "index"
-  decodeFile indexPath
+  index' <- decodeFile indexPath
+  return $ bimap id (oneLangIndex oneLang) index'
 
 ---
 -- cache
