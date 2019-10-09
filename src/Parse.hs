@@ -17,7 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
 import Text.Megaparsec hiding (State)
-import Text.Megaparsec.Char (char, string, eol)
+import Text.Megaparsec.Char (char, eol)
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
 import qualified Data.Set as S
@@ -31,11 +31,14 @@ type RawSynset = Either (ParseError Text Void) (Synset Unvalidated)
 -- to fill in implicit references
 type Parser = ParsecT Void Text (Reader (LexicographerFileId, Map Text Text, Map Text (NonEmpty WNObj, NonEmpty WNPOS)))
 
+wnNameR :: Parser Text
+wnNameR = reader $ (wnName :: LexicographerFileId -> Text) . fst3
+
 parseLexicographer :: Map Text Text
   -> Map Text (NonEmpty WNObj, NonEmpty WNPOS)
-  -> String -> Text
+  -> Text -> String -> Text
   -> SourceValidation (NonEmpty (Synset Unvalidated))
-parseLexicographer textToCanonicNames canonicToDomain fileName inputText =
+parseLexicographer textToCanonicNames canonicToDomain wnName fileName inputText =
   case runReader (runParserT lexicographerFile fileName inputText)
                  (lexFileId, textToCanonicNames, canonicToDomain) of
     Right rawSynsets
@@ -52,31 +55,35 @@ parseLexicographer textToCanonicNames canonicToDomain fileName inputText =
                        (SourcePosition (errorPos, errorPos +1))
                        (ParseError $ parseErrorTextPretty parseError)
     lexFileId :: LexicographerFileId
-    lexFileId  =
+    lexFileId =
       fromMaybe (error $ "Couldn't parse first line of "
                  ++ fileName ++ " as lexicographer file id") .
-                 lexicographerFileIdFromText . T.strip $ headerText
+                 lexicographerFileIdFromText wnName . T.strip $ headerText
     headerText = T.takeWhile (/= '\n') inputText
 
-lexicographerIdP :: Parser LexicographerFileId
-lexicographerIdP = do
-  maybePos     <- posP
-  _       <- char '.'
-  lexname <- lexnameP
+lexicographerIdP :: Monad m => Text -> ParsecT Void Text m LexicographerFileId
+lexicographerIdP defaultWN = do
+  wnName <- wnNameP
+  maybePos <- posP
+  lexname  <- char '.' *> lexnameP
   case maybePos of
     Nothing  -> failure Nothing (S.fromList
-                                 $ map toErrorItem ["noun", "verb", "adj", "adjs", "adv"])
-    Just pos -> return $ LexicographerFileId (pos, lexname)
+                                  $ map toErrorItem ["noun", "verb", "adj", "adjs", "adv"])
+    Just pos -> return $ LexicographerFileId{pos, lexname, wnName}
   where
     toErrorItem = Label . NE.fromList
     posP     = readLongWNPOS <$> takeWhile1P Nothing (/= '.')
-    lexnameP = lexeme (takeWhile1P Nothing (`notElem` [' ','\t',':','\n'])
-                 <?> "Lexicographer file name (must not contain whitespace or a colon)")
+    lexnameP = takeWhile1P Nothing (`notElem` [' ','\t',':','\n', '@'])
+                 <?> "Lexicographer file name (must not contain whitespace or a colon or an at symbol)"
+    wnNameP  = option defaultWN
+               (char '@' *> takeWhile1P Nothing (`notElem` [' ', '\t',':','\n']) <* char ':'
+               <?> "WordNet name")
 
 lexicographerFile :: Parser (NonEmpty RawSynset)
 lexicographerFile = do
   _          <- spaceConsumer
-  _          <- lexicographerIdP
+  wnName     <- wnNameR
+  _          <- lexicographerIdP wnName
   _          <- many linebreaks
   rawSynsets <- synsets
   _          <- eof
@@ -101,7 +108,7 @@ synset = do
   endOffset        <- getOffset
   return $ Synset (SourcePosition (startOffset, endOffset)) lexicographerId synsetWordSenses synsetDefinition synsetExamples synsetFrames synsetRelations
 
-spaceConsumer :: Parser ()
+spaceConsumer :: Monad m => ParsecT Void Text m ()
 -- comments will only be allowed as statements, because we want to
 -- serialize to this format too
 spaceConsumer = L.space spaces empty empty
@@ -133,7 +140,7 @@ synsetRelationStatement = L.nonIndented spaceConsumer go
   where
     go = SynsetRelation
       <$> relationNameP SynsetObj synsetRelationName
-      <*> (SynsetIdentifier <$> identifier)
+      <*> (SynsetId . toWNid <$> identifier)
     synsetRelationName = T.stripEnd
       -- [ ] handle this better
       <$> (takeWhile1P Nothing (`notElem` [':', ' ', '\n']) <?> "Synset relation name")
@@ -141,7 +148,7 @@ synsetRelationStatement = L.nonIndented spaceConsumer go
 
 relationNameP :: WNObj -> Parser Text -> Parser Text
 relationNameP obj name = do
-  LexicographerFileId (wnPOS, _) <- reader fst3
+  LexicographerFileId{pos} <- reader fst3
   relationsMap     <- reader $ \(_,second,_) -> second
   relationsDomains <- reader $ \(_,_,third) -> third
   relationName     <- name
@@ -150,11 +157,11 @@ relationNameP obj name = do
     Just canonicName -> if relationName `elem` ["d", "e", "fs", "w"]
               then fail "Synset components must come in the following order: words, definition, examples, frames, and synset relations"
               else case M.lookup canonicName relationsDomains of
-                     Just (domain,poses) -> case (obj `elem` domain, wnPOS `elem` poses) of
+                     Just (domain,poses) -> case (obj `elem` domain, pos `elem` poses) of
                        (True,True)  -> return relationName
                        _            -> fail $ relationString
                                             ++ " is not a valid relation for a " ++ show obj
-                                            ++ " with PoS " ++ show wnPOS
+                                            ++ " with PoS " ++ show pos
                      Nothing -> error $ "Can't find " ++ relationString ++ "'s domain"
     Nothing -> failure (Just $ toErrorItem relationName)
                        (S.fromList . map toErrorItem $ M.keys relationsMap)
@@ -169,8 +176,8 @@ wordSenseStatement = statement "w" go
     wordSenseFrames = option [] $ symbol "fs" *> frameNumbers
     wordSenseMarker = optional $ symbol "marker" *> word
 
-wordSenseIdentifier :: Parser WordSenseIdentifier
-wordSenseIdentifier = WordSenseIdentifier <$> identifier
+wordSenseIdentifier :: Parser WordSenseId
+wordSenseIdentifier = WordSenseId . toWNid <$> identifier
 
 identifier :: Parser (LexicographerFileId, WordSenseForm, LexicalId)
 identifier =
@@ -179,9 +186,8 @@ identifier =
   <*>  fmap WordSenseForm word <*> lexicalIdentifier
   where
     lexicographerIdentifier = do
-      lexId <- lexicographerIdP
-      _ <- string ":"
-      return lexId
+      wnName <- wnNameR
+      lexicographerIdP wnName <* char ':'
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
@@ -214,3 +220,5 @@ linebreak = void $ lexeme eol
 linebreaks :: Parser ()
 linebreaks = void $ some linebreak
 
+lexicographerFileIdFromText :: Text -> Text -> Maybe LexicographerFileId
+lexicographerFileIdFromText defaultWN = parseMaybe (lexicographerIdP defaultWN)

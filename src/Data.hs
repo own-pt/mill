@@ -7,9 +7,10 @@
 
 module Data where
 
-import Data.Aeson ( ToJSON(..), Value(..) )
+import Data.Aeson ( ToJSON(..) )
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (Binary)
+import Data.Coerce (coerce)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -25,7 +26,7 @@ import Text.Printf (printf)
 singleton :: a -> NonEmpty a
 singleton x = x :| []
 
-data WNObj = SynsetObj | WordObj deriving (Binary,Eq,Enum,Generic)
+data WNObj = SynsetObj | WordObj deriving (Binary,Eq,Enum,Generic,Ord)
 
 instance Show WNObj where
   show SynsetObj = "synset"
@@ -66,7 +67,11 @@ showLongWNPOS R = "adv"
 showLongWNPOS A = "adj"
 showLongWNPOS S = "adj"
 
-newtype LexicographerFileId = LexicographerFileId (WNPOS, Text)
+data LexicographerFileId
+  = LexicographerFileId { pos     :: WNPOS
+                        , lexname :: Text
+                        , wnName  :: Text
+                        }
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary,ToJSON)
 
@@ -78,21 +83,14 @@ synsetType R = 4
 synsetType S = 5
 
 lexicographerFileIdToText :: LexicographerFileId -> Text
-lexicographerFileIdToText (LexicographerFileId (wnPOS, filename)) =
-  T.concat [posText wnPOS, ".", filename]
+lexicographerFileIdToText LexicographerFileId{pos, lexname} =
+  T.concat [posText pos, ".", lexname]
   where
     posText N = "noun"
     posText V = "verb"
     posText A = "adj"
     posText S = "adjs"
     posText R = "adv"
-
-lexicographerFileIdFromText :: Text -> Maybe LexicographerFileId
-lexicographerFileIdFromText = go . T.breakOn "."
-  where
-    wrap pos name = LexicographerFileId (pos
-                                        , T.tail name) -- remove '.'
-    go (pos, name) = wrap <$> readLongWNPOS pos <*> Just name
 
 newtype WordSenseForm = WordSenseForm Text
   deriving (Eq,Ord,Generic,Show)
@@ -105,50 +103,64 @@ newtype LexicalId = LexicalId Int
 tshow :: Show a => a -> Text
 tshow = T.pack . show
 
-wnIdentifierToJSON :: ( LexicographerFileId, WordSenseForm , LexicalId) -> Value
-wnIdentifierToJSON (LexicographerFileId (wnPOS, lexname), WordSenseForm wordSenseForm, LexicalId lexId)
-  = toJSON (wnPOS, lexname, wordSenseForm, lexId)
-
-newtype WordSenseIdentifier =
-  WordSenseIdentifier ( LexicographerFileId
-                      , WordSenseForm
-                      , LexicalId
-                      )
+data WNid =
+  WNid { pos     :: WNPOS
+       , lexname :: Text
+       , wnName  :: Text
+       , lexForm :: WordSenseForm
+       , lexId   :: LexicalId
+       }
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary)
 
-instance ToJSON WordSenseIdentifier where
-  toJSON (WordSenseIdentifier wnIdentifier) = wnIdentifierToJSON wnIdentifier
+instance Pretty WNid where
+  pretty WNid{pos, lexname, wnName, lexForm, lexId}
+    =   pretty LexicographerFileId{pos, lexname, wnName}
+    <>  colon
+    <>  pretty lexForm
+    <+> pretty lexId
 
-makeWordSenseIdentifier :: LexicographerFileId -> WordSenseForm -> LexicalId
-  -> WordSenseIdentifier
-makeWordSenseIdentifier lexicographerId wordSenseForm lexicalId =
-  WordSenseIdentifier (lexicographerId, wordSenseForm, lexicalId)
+instance ToJSON WNid where
+  toJSON WNid{pos,lexname,wnName,lexForm,lexId}
+    = toJSON (wnName, pos, lexname, lexForm, lexId)
 
-newtype SynsetIdentifier =
-  SynsetIdentifier ( LexicographerFileId
-                   , WordSenseForm
-                   , LexicalId
-                   )
+
+toWNid :: (LexicographerFileId, WordSenseForm, LexicalId) -> WNid
+toWNid (LexicographerFileId{pos,wnName,lexname}, lexForm, lexId) = WNid{pos,wnName,lexname,lexForm,lexId}
+
+idLexFile :: WNid -> LexicographerFileId
+idLexFile WNid{..} = LexicographerFileId{..}
+
+newtype WordSenseId =
+  WordSenseId WNid
   deriving (Eq,Generic,Ord,Show)
-  deriving anyclass (Binary)
+  deriving anyclass (Binary,ToJSON)
+  deriving newtype (Pretty)
 
-instance ToJSON SynsetIdentifier where
-  toJSON (SynsetIdentifier wnIdentifier) = wnIdentifierToJSON wnIdentifier
+makeWordSenseId :: LexicographerFileId -> WordSenseForm -> LexicalId
+  -> WordSenseId
+makeWordSenseId LexicographerFileId{pos,lexname,wnName} lexForm lexId =
+  WordSenseId WNid{pos,lexname,wnName,lexForm,lexId}
+
+newtype SynsetId =
+  SynsetId WNid
+  deriving (Eq,Generic,Ord,Show)
+  deriving anyclass (Binary,ToJSON)
+  deriving newtype (Pretty)
 
 type PointerName = Text
 type RelationName = Text
-data WordPointer = WordPointer PointerName WordSenseIdentifier
+data WordPointer = WordPointer PointerName WordSenseId
   deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
-data SynsetRelation = SynsetRelation RelationName SynsetIdentifier
+data SynsetRelation = SynsetRelation RelationName SynsetId
   deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
-type FrameIdentifier = Int
-data WNWord = WNWord WordSenseIdentifier [FrameIdentifier] [WordPointer]
+type FrameId = Int
+data WNWord = WNWord WordSenseId [FrameId] [WordPointer]
   deriving (Binary,Eq,Generic,Ord,Show)
 
 senseKey :: Int -> Int -> Maybe SynsetRelation -> WNWord -> String
 senseKey lexFileNum synsetTypeNum maybeHeadRelation
-  wordSense@(WNWord (WordSenseIdentifier (_,WordSenseForm wordForm,LexicalId lexicalId)) _ _)
+  wordSense@(WNWord (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = LexicalId lexicalId}) _ _)
   = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum
                                 lexicalId headWordForm (headWordLexicalId :: String)
   where
@@ -156,7 +168,7 @@ senseKey lexFileNum synsetTypeNum maybeHeadRelation
     (headWordForm, headWordLexicalId) =
       case (synsetTypeNum, maybeHeadRelation) of
         (5, Just (SynsetRelation _
-                  (SynsetIdentifier (_,WordSenseForm headForm,LexicalId headLexicalId))))
+                  (SynsetId WNid{lexForm = WordSenseForm headForm,lexId = LexicalId headLexicalId})))
           -> (T.toLower headForm, printf "%02d" headLexicalId)
         (5,Nothing) -> error $ "No head synset found for " ++ show wordSense
         _           -> ("", "")
@@ -185,11 +197,11 @@ instance Ord (Synset Validated) where
     = headWord <= headWord2
 
 synsetPOS :: Synset a -> WNPOS
-synsetPOS Synset{lexicographerFileId = LexicographerFileId (wnPOS, _)} = wnPOS
+synsetPOS Synset{lexicographerFileId = LexicographerFileId{pos}} = pos
 
-synsetId :: Synset a -> SynsetIdentifier
-synsetId Synset{wordSenses = WNWord (WordSenseIdentifier wnIdentifier) _ _:|_}
-  = SynsetIdentifier wnIdentifier
+synsetId :: Synset a -> SynsetId
+synsetId Synset{wordSenses = WNWord wordSenseId _ _:|_}
+  = coerce wordSenseId
 
 ---- validation
 data Validation e a = Failure e | Success a deriving (Binary,Eq,Generic,Show)
@@ -258,36 +270,23 @@ instance Pretty WNPOS where
   pretty = pretty . showLongWNPOS
 
 instance Pretty LexicographerFileId where
-  pretty (LexicographerFileId (wnPOS, lexicographerName)) =
-    pretty wnPOS <> dot <> pretty lexicographerName
+  pretty LexicographerFileId{pos, lexname, wnName} =
+    "@" <> pretty wnName <> ":" <> pretty pos <> dot <> pretty lexname
 
-prettyIdentifier :: (LexicographerFileId, WordSenseForm, LexicalId) -> Doc ann
-prettyIdentifier (lexicographerFileId, wordSenseForm, lexicalId)
-  =   pretty lexicographerFileId
-  <>  colon
-  <>  pretty wordSenseForm
-  <+> pretty lexicalId
-
-instance Pretty WordSenseIdentifier where
-  pretty (WordSenseIdentifier wnIdentifier) = prettyIdentifier wnIdentifier
-
-instance Pretty SynsetIdentifier where
-  pretty (SynsetIdentifier wnIdentifier) = prettyIdentifier wnIdentifier
-
-prettyRelation :: Text -> (LexicographerFileId, WordSenseForm, LexicalId) -> Doc ann
-prettyRelation name wnIdentifier = pretty name <> "»" <> prettyIdentifier wnIdentifier
+prettyRelation :: Text -> WNid -> Doc ann
+prettyRelation name wnId = pretty name <> "»" <> pretty wnId
 
 instance Pretty WordPointer where
-  pretty (WordPointer pointerName (WordSenseIdentifier wnIdentifier))
-    = prettyRelation pointerName wnIdentifier
+  pretty (WordPointer pointerName (WordSenseId wnId))
+    = prettyRelation pointerName wnId
 
 instance Pretty SynsetRelation where
-  pretty (SynsetRelation relationName (SynsetIdentifier wnIdentifier))
-    = prettyRelation relationName wnIdentifier
+  pretty (SynsetRelation relationName (SynsetId wnId))
+    = prettyRelation relationName wnId
 
 instance Pretty WNWord where
-  pretty (WNWord (WordSenseIdentifier wnIdentifier) _ _)
-    = prettyIdentifier wnIdentifier
+  pretty (WNWord (WordSenseId wnId) _ _)
+    = pretty wnId
 
 instance Pretty (Synset a) where
   pretty Synset{wordSenses = wordSense:|_} = pretty wordSense

@@ -3,9 +3,30 @@
 ;; dependencies
 
 (require 'mill-flymake)
+(require 'seq)
+(require 'pcase)
 (require 'xref)
 
+;; customizable variable
+
+(defcustom mill--configuration-directory nil
+  "Path to directory where wordnet configuration files reside in, or `nil'."
+  :group 'mill
+  :type '(choice file (const nil)))
+
+(defvar mill-relations '("sa" "su" "sb")
+  "These relations are used by `mill-display-related-synset' to
+  display the definition of a synset related to the one at
+  point.")
+
 ;; constants
+
+;; (defconst mill--frames-file-name
+;;   "frames.tsv")
+
+(defconst mill--lexnames-config-file-name
+  "lexnames.tsv")
+
 
 ;;; fontification
 
@@ -14,12 +35,13 @@
   "Mill definition keywords.")
 
 (defconst mill--kwds-synset-rel
-  '("hm" "hp" "hs" "vg" "mm"
-    "mp" "ms" "sim" "entail"
-    "drf" "mt" "mr" "mu" "dt"
-    "dr" "du" "attr" "cause"
-    "hyper" "ihyper" "see"
-    "hypo" "ihypo"))
+  (append mill-relations
+	  '("hm" "hp" "hs" "vg" "mm"
+	    "mp" "ms" "sim" "entail"
+	    "drf" "mt" "mr" "mu" "dt"
+	    "dr" "du" "attr" "cause"
+	    "hyper" "ihyper" "see"
+	    "hypo" "ihypo" "sa" "su" "sb")))
 
 (defconst mill--kwds-word-rel
   '("ant" "vg" "drf"
@@ -52,6 +74,9 @@
      nil
      (0 font-lock-constant-face))))
 
+
+(defalias 'mill-λ #'pcase-lambda)
+
 ;;  mill xref backend
 
 (defun mill--xref-backend () 'xref-mill)
@@ -59,8 +84,10 @@
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql xref-mill)))
   (if (or (eq (get-char-property (point) 'face) 'font-lock-function-name-face)
 	  (eq (get-char-property (point) 'face) 'font-lock-constant-face))
-      (let ((beg (previous-single-property-change (point) 'face nil (line-beginning-position)))
-	    (end (next-single-property-change (point) 'face nil (line-end-position))))
+      (let ((beg (previous-single-property-change (point) 'face nil
+						  (line-beginning-position)))
+	    (end (next-single-property-change (point) 'face nil
+					      (line-end-position))))
 	(buffer-substring beg end))))
 
 
@@ -75,12 +102,12 @@
 	 (let maybe-lex-id   (optional (one-or-more (char digit)))))
      (let ((lex-file (if (string-empty-p maybe-lex-name)
 			 (buffer-file-name)
-		       (format "%s%s" default-directory
-			       (string-trim-right maybe-lex-name ":"))))
+		       (mill--lexname->file-path
+			(string-trim-right maybe-lex-name ":"))))
 	   (lex-id (unless (string-empty-p maybe-lex-id) maybe-lex-id)))
        (mill--collect-xref-matches lex-file
-				   lex-form
-				   lex-id)))))
+			       lex-form
+			       lex-id)))))
 
 
 (defun mill--collect-xref-matches (file lexical-form &optional lexical-id)
@@ -103,7 +130,43 @@
       (nreverse matches))))
 
 
-;; ident
+(defun mill-display-related-synset ()
+  "Display definition of related synset synset in another window.
+
+A related synset is a synset that relates to the synset at point
+by any of the relations in `mill-relations'."
+  (interactive)
+  (let* ((original-buffer (current-buffer))
+	 (original-window (get-buffer-window original-buffer))
+	 (original-point (point)))
+    (forward-char)     ;make it work when at first character of synset
+    (backward-sentence) 		;go to synset start
+    ;; search for related synset
+    (re-search-forward (format "^%s: *" "sa") (mill--paragraph-end-point) t 1)
+    ;; if successful, this command opens related synset in other
+    ;; window and selects it
+    (let ((identifier (xref-backend-identifier-at-point (mill--xref-backend))))
+      (unless identifier (user-error "No suitable identifier found"))
+      (xref-find-definitions-other-window identifier))
+    ;; this recenters it
+    (backward-sentence)
+    (recenter-top-bottom 0)
+    ;; re-select original window, recenter it, and put point at proper
+    ;; point
+    (select-window original-window)
+    (with-current-buffer original-buffer
+      (backward-sentence)
+      (recenter-top-bottom 0)
+      (goto-char original-point))))
+
+
+(defun mill--paragraph-end-point ()
+  (save-excursion
+    (forward-sentence)
+    (point)))
+
+
+;; indentation
 
 (defconst default-tab-width 3)
 
@@ -121,17 +184,101 @@
 	    (setq cur-indent (current-indentation)))))
       (indent-line-to cur-indent))))
 
+;; interactive commands
+
+(defun mill--configuration-file (filename)
+  (let* ((current-directory-path (expand-file-name filename))
+	 (configuration-file-path (expand-file-name filename
+						    mill--configuration-directory)))
+
+    (cond
+     ((file-exists-p current-directory-path)
+      current-directory-path)
+     ((file-exists-p configuration-file-path)
+      configuration-file-path)
+     (t
+      (user-error
+       "Can't find configuration file %s, try setting variable `mill--configuration-directory'"
+       filename)))))
+
+
+(defun mill--read-tsv (filepath)
+  (cl-labels
+      ((read-line ()
+		  (let* ((line (thing-at-point 'line t))
+			 (fields (split-string line "\t" nil "[ \f\n\r\v]+")))
+		    (pcase fields
+		      (`(,singleton)
+		       (unless (or (equal (substring singleton 0 2) "--")
+				   (string-empty-p singleton))
+			 fields))
+		      (_ fields)))))
+    (with-temp-buffer
+      (insert-file-contents filepath)
+      (goto-char (point-max))
+      (let ((result nil))
+	(while (not (bobp))
+	  (let ((fields (read-line)))
+	    (when fields
+	      (push fields result)))
+	  (forward-line -1))
+	result))))
+
+
+(defun mill--lexname->file-path (lexname)
+  (let* ((lines (mill--read-tsv (mill--configuration-file mill--lexnames-config-file-name)))
+	 (lexname->file-path-map (mapcar (mill-λ (`(,_id ,lexname ,relative-dir ,_description))
+					   (cons lexname relative-dir))
+					 lines)))
+    (concat
+     (file-name-as-directory
+      (map-elt lexname->file-path-map lexname nil #'equal))
+     lexname)))
+
+;;; FIXME: add frame
+;; (defalias 'mill--read-frames #'mill--read-tsv "Read frames configuration file.")
+
+;; (defun mill-new-frame ()
+;;   "Create new frame at point."
+;;   (interactive)
+;;   (let* ((frames (mill--read-frames (mill--configuration-file mill--frames-config-path)))
+;; 	 (choices (seq-map-indexed (lambda (elt idx) (cons (+ 97 idx) elt)) frames)))
+;;     (read-multiple-choice "Select frame: " choices)))
+
+
+(defun mill--at-wordsense-line? ()
+  (save-excursion
+    (goto-char (line-beginning-position))
+    (looking-at "w:")))
+
+;;; FIXME: add these
+;; (defun mill--new-wordsense-relation ())
+
+
+;; (defun mill--new-synset-relation ())
+
+
+;; (defun mill-new-relation ()
+;;   "Create new relation at point."
+;;   (interactive)
+;;   (if (mill--at-wordsense-line?)
+;;       (mill--new-wordsense-relation)
+;;     (mill--new-synset-relation)))
+
+
 ;;;###autoload
 (define-derived-mode mill-mode fundamental-mode "mill"
   "TODO: docstring"
 
-  ;; syntax-table
-  ;;; word
+  ;;; syntax-table
+  ;; word
   (modify-syntax-entry ?. "w")
   (modify-syntax-entry ?: "w")
   (modify-syntax-entry ?- "w")
   (modify-syntax-entry ?_ "w")
   (modify-syntax-entry ?' "w")
+  (modify-syntax-entry ?@ "w")
+  
 
   ;; truncate-lines
   (setq-local truncate-lines t)

@@ -30,7 +30,7 @@ TSV format.
 * Installation
 ** Python
 - install python 3
-- install the libraries in =requirements.txt= 
+- install the libraries in =requirements.txt=
   : pip install -r requirements.txt
 
 
