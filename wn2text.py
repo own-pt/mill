@@ -18,6 +18,8 @@ SYNSET_RELATIONS, WORD_RELATIONS, FRAMES_TO_ID = {}, {}, {}
 
 LEXICOGRAPHER_FILE = WN30['lexicographerFile']
 LANG = WN30['lang']
+CONTAINS_WORDSENSE = WN30['containsWordSense']
+SAME_AS = WN30['sameAs']
 
 
 @click.command()
@@ -94,7 +96,7 @@ def print_graph(graph, output_dir):
     langs     = set(graph.objects(predicate=LANG))
     if not langs:
         langs = [CURRENT_LANG]
-        for synset in graph.subjects(CONTAINS_WORDSENSE, None):
+        for synset in graph.subjects(CONTAINS_WORDSENSE):
             graph.add((synset, LANG, CURRENT_LANG))
     for lang in langs:
         CURRENT_LANG = lang
@@ -108,7 +110,7 @@ def sort_word_senses(graph, synset):
         lexical_form = graph.value(word, WN30["lexicalForm"])
         return lexical_form
     #
-    wordsenses = list(graph.objects(synset, WN30["containsWordSense"]))
+    wordsenses = list(graph.objects(synset, CONTAINS_WORDSENSE))
     return sorted(wordsenses,key=word_sense_form)
 
 
@@ -138,7 +140,7 @@ def word_sense_id(graph, lexicographer_file, word_sense):
     word_form = graph.value(word, WN30["lexicalForm"])
     lexical_id = graph.value(word_sense, WN30["lexicalId"])
     in_synset = graph.value(
-        predicate=WN30["containsWordSense"], object=word_sense)
+        predicate=CONTAINS_WORDSENSE, object=word_sense)
     in_lang = graph.value(in_synset, LANG)
     in_lexfile = graph.value(
         subject=in_synset, predicate=LEXICOGRAPHER_FILE)
@@ -254,6 +256,45 @@ def print_word_sense(graph, word_sense, lexicographer_file, write):
                                               lexicographer_file)),
           end="")
     print_word_relations()
+
+
+def check_conversion(original_file, new_file, format=rdf_file_format):
+    # check relations between synsets and wordsenses are preserved
+    ## FIXME: query RDF online and check what else to check, write up
+    ## what we are getting and what we are dropping
+    def new_uri(lexicographer_file, original_uri, wn_obj):
+        # FIXME: find lexform,lexid
+        return WN30EN["{}-{}-{}-{}".format(wn_obj, lexicographer_file,
+                                           lexical_form, lexical_id)]
+    #
+    original_g = Graph()
+    new_g = Graph()
+    original_g.parse(original_file, format=rdf_file_format)
+    new_g.parse(new_file, format=rdf_file_format)
+    for (original_en_synset, subj_lexfile) in original_g.subject_objects(LEXICOGRAPHER_FILE): # for every synset
+        for (predicate, obj) in original_g.predicate_objects(original_en_synset):
+            obj_lexfile = original_g.value(obj, LEXICOGRAPHER_FILE, any=False)
+            if obj_lexfile: # truthy if object is synset too
+                new_en_synset = new_uri(subj_lexfile, original_en_synset, "synset")
+                new_en_obj = new_synset_uri(obj_lexfile, obj, "synset")
+                if (new_en_synset, predicate, new_en_obj) not in new_g:
+                    print("synset relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))
+                new_pt_synset = new_g.value(predicate=SAME_AS, object=new_en_synset)
+                new_pt_obj = new_g.value(predicate=SAME_AS, object=new_en_obj)
+                if (new_pt_synset, predicate, new_pt_obj) not in new_g:
+                    print("synset relation {} missing between {} and {}".format(predicate, new_pt_synset, new_pt_obj))
+            # OPTIMIZE: check this first, then if it's literal
+            # (isinstance(x, Literal)), then synset
+            elif predicate == CONTAINS_WORDSENSE:
+                original_en_wordsense = obj
+                for (predicate, obj) in original_g.predicate_objects:
+                    obj_synset = original_g.value(predicate=CONTAINS_WORDSENSE,object=obj)
+                    if obj_synset: # if truthy obj is also a worsense
+                        obj_lexfile = original_g.value(obj_synset, LEXICOGRAPHER_FILE)
+                        new_en_wordsense = new__uri(subj_lexfile, original_en_worsense, "wordsense")
+                        new_en_obj = new_uri(obj_lexfile, obj, "wordsense")
+                        if (new_en_wordsense, predicate, new_en_obj) not in new_g:
+                            print("wordsense relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))                        
 
 
 if __name__ == '__main__':
