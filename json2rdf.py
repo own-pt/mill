@@ -12,6 +12,8 @@ WN30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
 WN30EN = Namespace("https://w3id.org/own-pt/wn30-en/instances/")
 WN30PT = Namespace("https://w3id.org/own-pt/wn30-pt/instances/") # not used (yet)
 
+WN30_LANG = {"en": WN30EN, "pt": WN30PT}
+
 ###
 ## json -> rdf
 DEFINITION         = "definition"
@@ -37,24 +39,25 @@ def from_json(json_input):
         yield json.loads(line)
 
 def to_graph(synsets_gen):
-    def make_id(lexicographer_file, lexical_form, lexical_id, obj=SYNSET):
-        return WN30EN["{}-{}-{}-{}".format(obj, lexicographer_file
-                                           , lexical_form, lexical_id)]
+    def make_id(lang, lexicographer_file, lexical_form, lexical_id, obj=SYNSET):
+        return WN30_LANG[lang]["{}-{}-{}-{}".format(obj, lexicographer_file,
+                                                    lexical_form, lexical_id)]
 
     def parse_id(id_array, obj=SYNSET):
-        [pos, lexname, lexical_form, lexical_id] = id_array
+        [lang, pos, lexname, lexical_form, lexical_id] = id_array
         lexicographer_file = "{}.{}".format(POS1TOLONG[pos], lexname)
-        obj_id = make_id(lexicographer_file, lexical_form, lexical_id, obj)
-        return obj_id, Literal(lexicographer_file), SYNSETTYPE[pos]
+        obj_id = make_id(lang, lexicographer_file, lexical_form, lexical_id, obj)
+        return lang, obj_id, Literal(lexicographer_file), SYNSETTYPE[pos]
 
     def add_relation(head, relation, obj=SYNSET):
-        g.add((head, WN30[relation[NAME]], parse_id(WN30EN[relation[ID]], obj)[0]))
+        _, obj_id, _, _ = parse_id(WN30EN[relation[ID]], obj)[0]
+        g.add((head, WN30[relation[NAME]], obj_id))
 
     def add_frame(head, frame):
         g.add((head, WN30[FRAME], Literal(frame)))
 
-    def add_word_sense(wordsense, lexicographer_file, synset_id):
-        wordsense_id = make_id(lexicographer_file, wordsense[LEXICAL_FORM]
+    def add_word_sense(lang, wordsense, lexicographer_file, synset_id):
+        wordsense_id = make_id(lang, lexicographer_file, wordsense[LEXICAL_FORM]
                                , wordsense[LEXICAL_ID], WORDSENSE)
         g.add((synset_id, WN30[CONTAINS_WORDSENSE], wordsense_id))
         g.add((wordsense_id, WN30[LEXICAL_FORM], Literal(wordsense[LEXICAL_FORM])))
@@ -64,13 +67,13 @@ def to_graph(synsets_gen):
         map(lambda frame: add_frame(wordsense_id, frame), wordsense[FRAMES])
 
     def add_synset(synset):
-        synset_id, lexicographer_file, synset_type = parse_id(synset[ID])
+        lang, synset_id, lexicographer_file, synset_type = parse_id(synset[ID])
         g.add((synset_id, RDF.type, synset_type))
         g.add((synset_id, WN30[LEXICOGRAPHER_FILE], lexicographer_file))
         g.add((synset_id, WN30[DEFINITION], Literal(synset[DEFINITION])))
         map(lambda example: g.add((synset_id, WN30[EXAMPLE], Literal(example)))
             , synset[EXAMPLES])
-        map(lambda wordsense: add_word_sense(wordsense, lexicographer_file, synset_id),
+        map(lambda wordsense: add_word_sense(lang, wordsense, lexicographer_file, synset_id),
             synset[WORDSENSES])
         map(lambda relation: add_relation(synset_id, relation), synset[RELATIONS])
         map(lambda frame: add_frame(synset_id, frame), synset[FRAMES])
