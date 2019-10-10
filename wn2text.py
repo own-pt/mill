@@ -20,9 +20,15 @@ LEXICOGRAPHER_FILE = WN30['lexicographerFile']
 LANG = WN30['lang']
 CONTAINS_WORDSENSE = WN30['containsWordSense']
 SAME_AS = WN30['sameAs']
+LEXICAL_ID = WN30['lexicalId']
+LEXICAL_FORM = WN30['lexicalForm']
+WORD = WN30['word']
 
+@click.group()
+def cli():
+    return None
 
-@click.command()
+@cli.command()
 @click.argument('rdf_input',
                 type=click.File(mode="rb"), required=True)
 @click.argument('config_dir',
@@ -106,8 +112,8 @@ def print_graph(graph, output_dir):
 
 def sort_word_senses(graph, synset):
     def word_sense_form(ws):
-        word = graph.value(ws, WN30["word"])
-        lexical_form = graph.value(word, WN30["lexicalForm"])
+        word = graph.value(ws, WORD)
+        lexical_form = graph.value(word, LEXICAL_FORM)
         return lexical_form
     #
     wordsenses = list(graph.objects(synset, CONTAINS_WORDSENSE))
@@ -136,9 +142,9 @@ def print_lexfile(graph, lexicographer_file, output_dir):
 
 
 def word_sense_id(graph, lexicographer_file, word_sense):
-    word = graph.value(word_sense, WN30["word"])
-    word_form = graph.value(word, WN30["lexicalForm"])
-    lexical_id = graph.value(word_sense, WN30["lexicalId"])
+    word = graph.value(word_sense, WORD)
+    word_form = graph.value(word, LEXICAL_FORM)
+    lexical_id = graph.value(word_sense, LEXICAL_ID)
     in_synset = graph.value(
         predicate=CONTAINS_WORDSENSE, object=word_sense)
     in_lang = graph.value(in_synset, LANG)
@@ -257,20 +263,37 @@ def print_word_sense(graph, word_sense, lexicographer_file, write):
           end="")
     print_word_relations()
 
-
-def check_conversion(original_file, new_file, format=rdf_file_format):
+@cli.command()
+@click.argument('original_file', type=click.File(mode="rb"), required=True)
+@click.argument('new_file', type=click.File(mode="rb"), required=True)
+@click.option('-f', '--rdf-format', 'rdf_format'
+              , type=click.STRING, default='nt', show_default=True,
+              help="RDF output format. Must be accepted by RDFlib.")
+def check_conversion(original_file, new_file, rdf_format):
     # check relations between synsets and wordsenses are preserved
-    ## FIXME: query RDF online and check what else to check, write up
-    ## what we are getting and what we are dropping
+    ## not checking lexform and lexical ids and other literals because
+    ## missing these would have caused syntactic problems (plus we
+    ## don't export syntacticMarker yet, for instance)
     def new_uri(lexicographer_file, original_uri, wn_obj):
         # FIXME: find lexform,lexid
+        if wn_obj == "synset":
+            wordsense = sort_word_senses(original_g, original_uri)[0]
+        elif wn_obj == "wordsense":
+            wordsense = original_uri
+        else:
+            raise Exception("argument wn_obj must be either synset or wordsense")
+        word = original_g.value(wordsense, WORD)
+        lexical_form = original_g.value(word, LEXICAL_FORM)
+        lexical_id = original_g.value(wordsense, LEXICAL_ID)
         return WN30EN["{}-{}-{}-{}".format(wn_obj, lexicographer_file,
                                            lexical_form, lexical_id)]
     #
     original_g = Graph()
     new_g = Graph()
-    original_g.parse(original_file, format=rdf_file_format)
-    new_g.parse(new_file, format=rdf_file_format)
+    open_db(original_g)
+    open_db(new_g)
+    original_g.parse(original_file, format=rdf_format)
+    new_g.parse(new_file, format=rdf_format)
     for (original_en_synset, subj_lexfile) in original_g.subject_objects(LEXICOGRAPHER_FILE): # for every synset
         for (predicate, obj) in original_g.predicate_objects(original_en_synset):
             obj_lexfile = original_g.value(obj, LEXICOGRAPHER_FILE, any=False)
@@ -296,4 +319,4 @@ def check_conversion(original_file, new_file, format=rdf_file_format):
 
 
 if __name__ == '__main__':
-    to_text()
+    cli()
