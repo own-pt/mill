@@ -1,12 +1,6 @@
 # -*- mode: org -*-
-
 #+Title: mill mode
 
-* use-package declaration
+Editor mode for editing =mill= lexicographer files.
 
-#+BEGIN_SRC elisp
-
-  (use-package mill-mode
-    :load-path "PATH-TO/mill/elisp/")
-
-#+END_SRC
+See the [[https://github.com/own-pt/mill/wiki/Editor-Support][Wiki]].

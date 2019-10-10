@@ -2,10 +2,12 @@
 
 ;; dependencies
 
-(require 'mill-flymake)
 (require 'seq)
+(require 'rx)
+(require 'map)
 (require 'pcase)
 (require 'xref)
+(require 'mill-flymake)
 
 ;; customizable variable
 
@@ -14,7 +16,7 @@
   :group 'mill
   :type '(choice file (const nil)))
 
-(defvar mill-relations '("sa" "su" "sb")
+(defvar mill-inter-wordnet-relations '("sa" "su" "sb")
   "These relations are used by `mill-display-related-synset' to
   display the definition of a synset related to the one at
   point.")
@@ -27,6 +29,9 @@
 (defconst mill--lexnames-config-file-name
   "lexnames.tsv")
 
+(defconst mill--wns-config-file-name
+  "wns.tsv")
+
 
 ;;; fontification
 
@@ -35,7 +40,7 @@
   "Mill definition keywords.")
 
 (defconst mill--kwds-synset-rel
-  (append mill-relations
+  (append mill-inter-wordnet-relations
 	  '("hm" "hp" "hs" "vg" "mm"
 	    "mp" "ms" "sim" "entail"
 	    "drf" "mt" "mr" "mu" "dt"
@@ -93,17 +98,22 @@
 
 (cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
   (pcase (string-trim identifier)
-    ((rx (let maybe-lex-name (optional (or "noun" "adjs" "adj" "adv" "verb")
-				 "."
-				 (one-or-more (not (any ?:)))
-				 ":"))
-	 (let lex-form       (one-or-more (not (any ? ))))
-	 (optional (1+ space))
-	 (let maybe-lex-id   (optional (one-or-more (char digit)))))
+    ((rx
+      (let maybe-wn (optional "@" (one-or-more (not (any ?:))) ":"))
+      (let maybe-lex-name (optional (or "noun" "adjs" "adj" "adv" "verb")
+				    "."
+				    (one-or-more (not (any ?:)))
+				    ":"))
+      (let lex-form       (one-or-more (not (any ? ))))
+      (optional (1+ space))
+      (let maybe-lex-id   (optional (one-or-more (char digit)))))
      (let ((lex-file (if (string-empty-p maybe-lex-name)
+			 ;; if wn is specified so must be the lexname,
+			 ;; but not the contrary
 			 (buffer-file-name)
 		       (mill--lexname->file-path
-			(string-trim-right maybe-lex-name ":"))))
+			(string-trim-right maybe-lex-name ":")
+			(string-trim-right (substring maybe-wn 1) ":"))))
 	   (lex-id (unless (string-empty-p maybe-lex-id) maybe-lex-id)))
        (mill--collect-xref-matches lex-file
 			       lex-form
@@ -134,7 +144,8 @@
   "Display definition of related synset synset in another window.
 
 A related synset is a synset that relates to the synset at point
-by any of the relations in `mill-relations'."
+by any of the relations in `mill-inter-wordnet-relations'. If
+several of these relations are found, the first is used."
   (interactive)
   (let* ((original-buffer (current-buffer))
 	 (original-window (get-buffer-window original-buffer))
@@ -142,7 +153,8 @@ by any of the relations in `mill-relations'."
     (forward-char)     ;make it work when at first character of synset
     (backward-sentence) 		;go to synset start
     ;; search for related synset
-    (re-search-forward (format "^%s: *" "sa") (mill--paragraph-end-point) t 1)
+    (re-search-forward (format "^%s: *" (regexp-opt mill-inter-wordnet-relations t))
+		       (mill--sentence-end-point) t 1)
     ;; if successful, this command opens related synset in other
     ;; window and selects it
     (let ((identifier (xref-backend-identifier-at-point (mill--xref-backend))))
@@ -160,7 +172,7 @@ by any of the relations in `mill-relations'."
       (goto-char original-point))))
 
 
-(defun mill--paragraph-end-point ()
+(defun mill--sentence-end-point ()
   (save-excursion
     (forward-sentence)
     (point)))
@@ -225,15 +237,18 @@ by any of the relations in `mill-relations'."
 	result))))
 
 
-(defun mill--lexname->file-path (lexname)
-  (let* ((lines (mill--read-tsv (mill--configuration-file mill--lexnames-config-file-name)))
-	 (lexname->file-path-map (mapcar (mill-λ (`(,_id ,lexname ,relative-dir ,_description))
-					   (cons lexname relative-dir))
-					 lines)))
-    (concat
-     (file-name-as-directory
-      (map-elt lexname->file-path-map lexname nil #'equal))
-     lexname)))
+(defun mill--lexname->file-path (lexname &optional wn)
+  "Given LEXNAME and possibly a WN, return the relative file path of specified lexicographer file"
+  (if wn
+      (let* ((lines (mill--read-tsv (mill--configuration-file mill--wns-config-file-name)))
+	     (wn->directory-map (mapcar (mill-λ (`(,wn-name ,rel-dir)) (cons wn-name rel-dir))
+					lines))
+	     (wn-dir (map-elt wn->directory-map wn nil #'equal)))
+	(unless wn-dir
+	  (user-error "%s WordNet not specified in configuration" wn))
+	(concat (file-name-as-directory wn-dir)
+		lexname))
+    lexname))
 
 ;;; FIXME: add frame
 ;; (defalias 'mill--read-frames #'mill--read-tsv "Read frames configuration file.")
@@ -270,7 +285,7 @@ by any of the relations in `mill-relations'."
 (define-derived-mode mill-mode fundamental-mode "mill"
   "TODO: docstring"
 
-  ;;; syntax-table
+;;; syntax-table
   ;; word
   (modify-syntax-entry ?. "w")
   (modify-syntax-entry ?: "w")
@@ -294,6 +309,9 @@ by any of the relations in `mill-relations'."
 	   ,mill--font-lock-kwds-defs
 	   ,mill--font-lock-synset-relation)
 	  nil))
+
+  ;; to be able to use M-a and M-e to jump
+  (setq-local sentence-end ".$$")
 
   ;; xref
   (add-hook 'xref-backend-functions #'mill--xref-backend nil t)
