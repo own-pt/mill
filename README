@@ -1,8 +1,9 @@
 # -*- mode: org -*-
 #+TITLE: mill: edit and convert wordnet data in human-readable text format
 
-This tool will produces the data found in
-https://github.com/own-pt/own-en/.
+This tool validates and exports the data found in
+https://github.com/own-pt/own-en/ and
+https://github.com/own-pt/own-pt/.
 
 See the [[https://github.com/own-pt/mill/wiki/][Wiki]] for more information.
 
