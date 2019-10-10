@@ -274,7 +274,17 @@ def check_conversion(original_file, new_file, format=rdf_file_format):
     for (original_en_synset, subj_lexfile) in original_g.subject_objects(LEXICOGRAPHER_FILE): # for every synset
         for (predicate, obj) in original_g.predicate_objects(original_en_synset):
             obj_lexfile = original_g.value(obj, LEXICOGRAPHER_FILE, any=False)
-            if obj_lexfile: # truthy if object is synset too
+            if predicate == CONTAINS_WORDSENSE:
+                original_en_wordsense = obj
+                for (predicate, obj) in original_g.predicate_objects(original_en_wordsense):
+                    obj_synset = original_g.value(predicate=CONTAINS_WORDSENSE,object=obj)
+                    if obj_synset: # if truthy obj is also a wordsense
+                        obj_lexfile = original_g.value(obj_synset, LEXICOGRAPHER_FILE)
+                        new_en_wordsense = new_uri(subj_lexfile, original_en_wordsense, "wordsense")
+                        new_en_obj = new_uri(obj_lexfile, obj, "wordsense")
+                        if (new_en_wordsense, predicate, new_en_obj) not in new_g:
+                            print("wordsense relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))
+            elif obj_lexfile: # truthy if object is synset too
                 new_en_synset = new_uri(subj_lexfile, original_en_synset, "synset")
                 new_en_obj = new_synset_uri(obj_lexfile, obj, "synset")
                 if (new_en_synset, predicate, new_en_obj) not in new_g:
@@ -283,18 +293,6 @@ def check_conversion(original_file, new_file, format=rdf_file_format):
                 new_pt_obj = new_g.value(predicate=SAME_AS, object=new_en_obj)
                 if (new_pt_synset, predicate, new_pt_obj) not in new_g:
                     print("synset relation {} missing between {} and {}".format(predicate, new_pt_synset, new_pt_obj))
-            # OPTIMIZE: check this first, then if it's literal
-            # (isinstance(x, Literal)), then synset
-            elif predicate == CONTAINS_WORDSENSE:
-                original_en_wordsense = obj
-                for (predicate, obj) in original_g.predicate_objects:
-                    obj_synset = original_g.value(predicate=CONTAINS_WORDSENSE,object=obj)
-                    if obj_synset: # if truthy obj is also a worsense
-                        obj_lexfile = original_g.value(obj_synset, LEXICOGRAPHER_FILE)
-                        new_en_wordsense = new__uri(subj_lexfile, original_en_worsense, "wordsense")
-                        new_en_obj = new_uri(obj_lexfile, obj, "wordsense")
-                        if (new_en_wordsense, predicate, new_en_obj) not in new_g:
-                            print("wordsense relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))                        
 
 
 if __name__ == '__main__':
