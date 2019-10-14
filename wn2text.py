@@ -18,9 +18,17 @@ SYNSET_RELATIONS, WORD_RELATIONS, FRAMES_TO_ID = {}, {}, {}
 
 LEXICOGRAPHER_FILE = WN30['lexicographerFile']
 LANG = WN30['lang']
+CONTAINS_WORDSENSE = WN30['containsWordSense']
+SAME_AS = WN30['sameAs']
+LEXICAL_ID = WN30['lexicalId']
+LEXICAL_FORM = WN30['lexicalForm']
+WORD = WN30['word']
 
+@click.group()
+def cli():
+    return None
 
-@click.command()
+@cli.command()
 @click.argument('rdf_input',
                 type=click.File(mode="rb"), required=True)
 @click.argument('config_dir',
@@ -94,7 +102,7 @@ def print_graph(graph, output_dir):
     langs     = set(graph.objects(predicate=LANG))
     if not langs:
         langs = [CURRENT_LANG]
-        for synset in graph.subjects(CONTAINS_WORDSENSE, None):
+        for synset in graph.subjects(CONTAINS_WORDSENSE):
             graph.add((synset, LANG, CURRENT_LANG))
     for lang in langs:
         CURRENT_LANG = lang
@@ -104,12 +112,15 @@ def print_graph(graph, output_dir):
 
 def sort_word_senses(graph, synset):
     def word_sense_form(ws):
-        word = graph.value(ws, WN30["word"])
-        lexical_form = graph.value(word, WN30["lexicalForm"])
+        word = graph.value(ws, WORD)
+        lexical_form = graph.value(word, LEXICAL_FORM)
         return lexical_form
     #
-    wordsenses = list(graph.objects(synset, WN30["containsWordSense"]))
-    return sorted(wordsenses,key=word_sense_form)
+    wordsenses = list(graph.objects(synset, CONTAINS_WORDSENSE))
+    if wordsenses:
+        return sorted(wordsenses,key=word_sense_form)
+    else:
+        print("missing ws for {}".format(synset))
 
 
 def sort_synsets(graph, synsets):
@@ -134,11 +145,11 @@ def print_lexfile(graph, lexicographer_file, output_dir):
 
 
 def word_sense_id(graph, lexicographer_file, word_sense):
-    word = graph.value(word_sense, WN30["word"])
-    word_form = graph.value(word, WN30["lexicalForm"])
-    lexical_id = graph.value(word_sense, WN30["lexicalId"])
+    word = graph.value(word_sense, WORD)
+    word_form = graph.value(word, LEXICAL_FORM)
+    lexical_id = graph.value(word_sense, LEXICAL_ID)
     in_synset = graph.value(
-        predicate=WN30["containsWordSense"], object=word_sense)
+        predicate=CONTAINS_WORDSENSE, object=word_sense)
     in_lang = graph.value(in_synset, LANG)
     in_lexfile = graph.value(
         subject=in_synset, predicate=LEXICOGRAPHER_FILE)
@@ -255,6 +266,57 @@ def print_word_sense(graph, word_sense, lexicographer_file, write):
           end="")
     print_word_relations()
 
+@cli.command()
+@click.argument('original_file', type=click.File(mode="rb"), required=True)
+@click.argument('new_file', type=click.File(mode="rb"), required=True)
+@click.option('-f', '--rdf-format', 'rdf_format'
+              , type=click.STRING, default='nt', show_default=True,
+              help="RDF output format. Must be accepted by RDFlib.")
+def check_conversion(original_file, new_file, rdf_format):
+    # check relations between synsets and wordsenses are preserved
+    ## not checking lexform and lexical ids and other literals because
+    ## missing these would have caused syntactic problems (plus we
+    ## don't export syntacticMarker yet, for instance)
+    def new_uri(lexicographer_file, original_uri, wn_obj):
+        if wn_obj == "synset":
+            wordsense = sort_word_senses(original_g, original_uri)[0]
+        elif wn_obj == "wordsense":
+            wordsense = original_uri
+        else:
+            raise Exception("argument wn_obj must be either synset or wordsense")
+        word = original_g.value(wordsense, WORD)
+        lexical_form = original_g.value(word, LEXICAL_FORM)
+        lexical_id = original_g.value(wordsense, LEXICAL_ID)
+        return WN30EN["{}-{}-{}-{}".format(wn_obj, lexicographer_file,
+                                           lexical_form, lexical_id)]
+    #
+    original_g = Graph()
+    new_g = Graph()
+    original_g.parse(original_file, format=rdf_format)
+    new_g.parse(new_file, format=rdf_format)
+    for (original_en_synset, subj_lexfile) in original_g.subject_objects(LEXICOGRAPHER_FILE): # for every synset
+        for (predicate, obj) in original_g.predicate_objects(original_en_synset):
+            obj_lexfile = original_g.value(obj, LEXICOGRAPHER_FILE, any=False)
+            if predicate == CONTAINS_WORDSENSE:
+                original_en_wordsense = obj
+                for (predicate, obj) in original_g.predicate_objects(original_en_wordsense):
+                    obj_synset = original_g.value(predicate=CONTAINS_WORDSENSE,object=obj)
+                    if obj_synset: # if truthy obj is also a wordsense
+                        obj_lexfile = original_g.value(obj_synset, LEXICOGRAPHER_FILE)
+                        new_en_wordsense = new_uri(subj_lexfile, original_en_wordsense, "wordsense")
+                        new_en_obj = new_uri(obj_lexfile, obj, "wordsense")
+                        if (new_en_wordsense, predicate, new_en_obj) not in new_g:
+                            print("wordsense relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))
+            elif obj_lexfile: # truthy if object is synset too
+                new_en_synset = new_uri(subj_lexfile, original_en_synset, "synset")
+                new_en_obj = new_uri(obj_lexfile, obj, "synset")
+                if (new_en_synset, predicate, new_en_obj) not in new_g:
+                    print("synset relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))
+                new_pt_synset = new_g.value(predicate=SAME_AS, object=new_en_synset)
+                new_pt_obj = new_g.value(predicate=SAME_AS, object=new_en_obj)
+                if (new_pt_synset, predicate, new_pt_obj) not in new_g:
+                    print("synset relation {} missing between {} and {}".format(predicate, new_pt_synset, new_pt_obj))
+
 
 if __name__ == '__main__':
-    to_text()
+    cli()
