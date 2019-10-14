@@ -9,12 +9,14 @@
 (require 'xref)
 (require 'mill-flymake)
 
-;; customizable variable
+;; customizable variables
 
 (defcustom mill--configuration-directory nil
   "Path to directory where wordnet configuration files reside in, or `nil'."
   :group 'mill
   :type '(choice file (const nil)))
+
+;; variables
 
 (defvar mill-inter-wordnet-relations '("sa" "su" "sb")
   "These relations are used by `mill-display-related-synset' to
@@ -23,8 +25,8 @@
 
 ;; constants
 
-;; (defconst mill--frames-file-name
-;;   "frames.tsv")
+(defconst mill--frames-file-name
+  "frames.tsv")
 
 (defconst mill--lexnames-config-file-name
   "lexnames.tsv")
@@ -251,14 +253,29 @@ several of these relations are found, the first is used."
     lexname))
 
 ;;; FIXME: add frame
-;; (defalias 'mill--read-frames #'mill--read-tsv "Read frames configuration file.")
+(defalias 'mill--read-frames #'mill--read-tsv "Read frames configuration file.")
 
-;; (defun mill-new-frame ()
-;;   "Create new frame at point."
-;;   (interactive)
-;;   (let* ((frames (mill--read-frames (mill--configuration-file mill--frames-config-path)))
-;; 	 (choices (seq-map-indexed (lambda (elt idx) (cons (+ 97 idx) elt)) frames)))
-;;     (read-multiple-choice "Select frame: " choices)))
+(defun mill-list-frames ()
+  "Create new frame at point."
+  (interactive)
+  ;; FIXME: generalize code so that we use this for relations
+  (let ((original-buffer (current-buffer))
+	(buffer (generate-new-buffer "* mill-frame*")))
+    (with-current-buffer buffer
+      (setq-local tabulated-list-format [("Number" 7 t) ("Template" 0 t)])
+      (let ((frames (mill--read-frames (mill--configuration-file mill--frames-file-name)))
+	    (frame-to-entry (mill-λ (`(,n ,template)) (list n (vector (list n 'action (mill-λ (but) (princ (format "%s " (button-label but)) original-buffer)))
+								  template)))))
+	(setq-local tabulated-list-entries (mapcar frame-to-entry frames)))
+      (tabulated-list-mode)
+      (hl-line-mode)
+      (tabulated-list-init-header)
+      (tabulated-list-print)
+      (display-buffer buffer
+		      (cons 'display-buffer-below-selected
+			    '((window-height . fit-window-to-buffer)
+			      (preserve-size . (nil . t)))))
+      (select-window (get-buffer-window buffer)))))
 
 
 (defun mill--at-wordsense-line? ()
