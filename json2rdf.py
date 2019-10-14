@@ -50,7 +50,7 @@ def to_graph(synsets_gen):
         return lang, obj_id, Literal(lexicographer_file), SYNSETTYPE[pos]
 
     def add_relation(head, relation, obj=SYNSET):
-        _, obj_id, _, _ = parse_id(WN30EN[relation[ID]], obj)[0]
+        _, obj_id, _, _ = parse_id(relation[ID], obj)
         g.add((head, WN30[relation[NAME]], obj_id))
 
     def add_frame(head, frame):
@@ -62,21 +62,24 @@ def to_graph(synsets_gen):
         g.add((synset_id, WN30[CONTAINS_WORDSENSE], wordsense_id))
         g.add((wordsense_id, WN30[LEXICAL_FORM], Literal(wordsense[LEXICAL_FORM])))
         g.add((wordsense_id, WN30[SENSEKEY], Literal(wordsense[SENSEKEY])))
-        map(lambda relation: add_relation(wordsense_id, relation, WORDSENSE)
-            , wordsense[POINTERS])
-        map(lambda frame: add_frame(wordsense_id, frame), wordsense[FRAMES])
+        for relation in wordsense[POINTERS]:
+            add_relation(wordsense_id, relation, WORDSENSE)
+        for frame in wordsense[FRAMES]:
+            add_frame(wordsense_id, frame)
 
     def add_synset(synset):
         lang, synset_id, lexicographer_file, synset_type = parse_id(synset[ID])
         g.add((synset_id, RDF.type, synset_type))
         g.add((synset_id, WN30[LEXICOGRAPHER_FILE], lexicographer_file))
         g.add((synset_id, WN30[DEFINITION], Literal(synset[DEFINITION])))
-        map(lambda example: g.add((synset_id, WN30[EXAMPLE], Literal(example)))
-            , synset[EXAMPLES])
-        map(lambda wordsense: add_word_sense(lang, wordsense, lexicographer_file, synset_id),
-            synset[WORDSENSES])
-        map(lambda relation: add_relation(synset_id, relation), synset[RELATIONS])
-        map(lambda frame: add_frame(synset_id, frame), synset[FRAMES])
+        for example in synset[EXAMPLES]:
+            g.add((synset_id, WN30[EXAMPLE], Literal(example)))
+        for wordsense in synset[WORDSENSES]:
+            add_word_sense(lang, wordsense, lexicographer_file, synset_id),
+        for relation in synset[RELATIONS]:
+            add_relation(synset_id, relation)
+        for frame in synset[FRAMES]:
+            add_frame(synset_id, frame)
 
 
     g = Graph()

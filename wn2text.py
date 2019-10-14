@@ -117,7 +117,10 @@ def sort_word_senses(graph, synset):
         return lexical_form
     #
     wordsenses = list(graph.objects(synset, CONTAINS_WORDSENSE))
-    return sorted(wordsenses,key=word_sense_form)
+    if wordsenses:
+        return sorted(wordsenses,key=word_sense_form)
+    else:
+        print("missing ws for {}".format(synset))
 
 
 def sort_synsets(graph, synsets):
@@ -275,7 +278,6 @@ def check_conversion(original_file, new_file, rdf_format):
     ## missing these would have caused syntactic problems (plus we
     ## don't export syntacticMarker yet, for instance)
     def new_uri(lexicographer_file, original_uri, wn_obj):
-        # FIXME: find lexform,lexid
         if wn_obj == "synset":
             wordsense = sort_word_senses(original_g, original_uri)[0]
         elif wn_obj == "wordsense":
@@ -290,8 +292,6 @@ def check_conversion(original_file, new_file, rdf_format):
     #
     original_g = Graph()
     new_g = Graph()
-    open_db(original_g)
-    open_db(new_g)
     original_g.parse(original_file, format=rdf_format)
     new_g.parse(new_file, format=rdf_format)
     for (original_en_synset, subj_lexfile) in original_g.subject_objects(LEXICOGRAPHER_FILE): # for every synset
@@ -309,7 +309,7 @@ def check_conversion(original_file, new_file, rdf_format):
                             print("wordsense relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))
             elif obj_lexfile: # truthy if object is synset too
                 new_en_synset = new_uri(subj_lexfile, original_en_synset, "synset")
-                new_en_obj = new_synset_uri(obj_lexfile, obj, "synset")
+                new_en_obj = new_uri(obj_lexfile, obj, "synset")
                 if (new_en_synset, predicate, new_en_obj) not in new_g:
                     print("synset relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))
                 new_pt_synset = new_g.value(predicate=SAME_AS, object=new_en_synset)
