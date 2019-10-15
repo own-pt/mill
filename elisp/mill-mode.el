@@ -285,7 +285,7 @@ several of these relations are found, the first is used."
 
 
 (defun mill--long-pos->short (lpos)
-  (cl-case lpos
+  (pcase lpos
     ("noun" "n")
     ("verb" "v")
     ("adj" "a")
@@ -294,12 +294,17 @@ several of these relations are found, the first is used."
 
 
 (defun mill-list-relations (obj pos)
+  "List relations contained in configuration file.
+
+The relations are shown if they have OBJ as domain and POS as PoS.
+
+Click or press RET to insert relation code at point."
   (interactive (list
 		(if (mill--at-wordsense-line?) "word" "synset")
 		;; very hacky
 		(mill--long-pos->short (file-name-base))))
   (let* ((original-buffer (current-buffer))
-	 (format [("Code" 7 t) ("Name" 15 t) ("Description" 0 t)])
+	 (format [("Code" 10 t) ("Name" 18 t) ("Description" 0 t)])
 	 (relations (mill--read-relations (mill--configuration-file mill-relations-config-file-name)
 				      :obj obj :pos pos))
 	 (relation-to-entry (mill-λ (`(,name ,code ,description))
@@ -311,14 +316,17 @@ several of these relations are found, the first is used."
 						    original-buffer)))
 				     name description))))
 	 (entries (mapcar relation-to-entry relations)))
-    (mill--setup-tabulated-list-mode " *mill-relations*" format entries)))
+    (mill--setup-tabulated-list-mode (format " *mill-relations-%s-%s*" obj pos)
+				 format entries)))
 
 
 
 (defalias 'mill--read-frames #'mill--read-tsv "Read frames configuration file.")
 
 (defun mill-list-frames ()
-  "Create new frame at point."
+  "List frames contained in configuration file.
+
+Press RET or click to insert frame number at point."
   (interactive)
   (let* ((original-buffer (current-buffer))
 	 (format [("Number" 7 t) ("Template" 0 t)])
