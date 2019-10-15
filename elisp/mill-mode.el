@@ -25,13 +25,16 @@
 
 ;; constants
 
-(defconst mill--frames-file-name
+(defconst mill-frames-file-name
   "frames.tsv")
 
-(defconst mill--lexnames-config-file-name
+(defconst mill-lexnames-config-file-name
   "lexnames.tsv")
 
-(defconst mill--wns-config-file-name
+(defconst mill-relations-config-file-name
+  "relations.tsv")
+
+(defconst mill-wns-config-file-name
   "wns.tsv")
 
 
@@ -188,7 +191,7 @@ several of these relations are found, the first is used."
   (beginning-of-line)
   (if (bobp)
       (indent-line-to 0)
-    (let ((not-indented t) cur-indent)
+    (let (cur-indent)
       (if (looking-at "^[ \t]*\\sw+:")
 	  (setq cur-indent 0)
 	(save-excursion
@@ -252,30 +255,84 @@ several of these relations are found, the first is used."
 		lexname))
     lexname))
 
-;;; FIXME: add frame
+
+(defun mill--setup-tabulated-list-mode (buffer-name format entries)
+  (let ((buffer (generate-new-buffer buffer-name)))
+    (with-current-buffer buffer
+      (setq-local tabulated-list-format format)
+      (setq-local tabulated-list-entries entries)
+      (tabulated-list-mode)
+      (tabulated-list-init-header)
+      (tabulated-list-print)
+      (hl-line-mode))
+    (display-buffer buffer
+		    (cons 'display-buffer-below-selected
+			  '((window-height . fit-window-to-buffer)
+			    (preserve-size . (nil . t)))))
+    (select-window (get-buffer-window buffer))))
+
+
+(cl-defun mill--read-relations (filepath &key obj pos)
+  (let* ((relations (mill--read-tsv filepath))
+	 (rel-filter (mill-λ (`(,name ,_ ,code ,_ ,rel-pos ,rel-domain ,description))
+		       (when (and (not (string= code "_"))
+				  (or (not pos)
+				      (member pos (split-string rel-pos "," t)))
+				  (or (not obj)
+				      (member obj (split-string rel-domain "," t))))
+			 (list (list name code description))))))
+    (mapcan rel-filter relations)))
+
+
+(defun mill--long-pos->short (lpos)
+  (cl-case lpos
+    ("noun" "n")
+    ("verb" "v")
+    ("adj" "a")
+    ("adjs" "s")
+    ("adv" "r")))
+
+
+(defun mill-list-relations (obj pos)
+  (interactive (list
+		(if (mill--at-wordsense-line?) "word" "synset")
+		;; very hacky
+		(mill--long-pos->short (file-name-base))))
+  (let* ((original-buffer (current-buffer))
+	 (format [("Code" 7 t) ("Name" 15 t) ("Description" 0 t)])
+	 (relations (mill--read-relations (mill--configuration-file mill-relations-config-file-name)
+				      :obj obj :pos pos))
+	 (relation-to-entry (mill-λ (`(,name ,code ,description))
+			      (list code
+				    (vector
+				     (list code 'action
+					   (mill-λ (but)
+					     (princ (format "%s" (button-label but))
+						    original-buffer)))
+				     name description))))
+	 (entries (mapcar relation-to-entry relations)))
+    (mill--setup-tabulated-list-mode " *mill-relations*" format entries)))
+
+
+
 (defalias 'mill--read-frames #'mill--read-tsv "Read frames configuration file.")
 
 (defun mill-list-frames ()
   "Create new frame at point."
   (interactive)
-  ;; FIXME: generalize code so that we use this for relations
-  (let ((original-buffer (current-buffer))
-	(buffer (generate-new-buffer "* mill-frame*")))
-    (with-current-buffer buffer
-      (setq-local tabulated-list-format [("Number" 7 t) ("Template" 0 t)])
-      (let ((frames (mill--read-frames (mill--configuration-file mill--frames-file-name)))
-	    (frame-to-entry (mill-λ (`(,n ,template)) (list n (vector (list n 'action (mill-λ (but) (princ (format "%s " (button-label but)) original-buffer)))
-								  template)))))
-	(setq-local tabulated-list-entries (mapcar frame-to-entry frames)))
-      (tabulated-list-mode)
-      (hl-line-mode)
-      (tabulated-list-init-header)
-      (tabulated-list-print)
-      (display-buffer buffer
-		      (cons 'display-buffer-below-selected
-			    '((window-height . fit-window-to-buffer)
-			      (preserve-size . (nil . t)))))
-      (select-window (get-buffer-window buffer)))))
+  (let* ((original-buffer (current-buffer))
+	 (format [("Number" 7 t) ("Template" 0 t)])
+	 (frames (mill--read-frames (mill--configuration-file mill--frames-file-name)))
+	 (frame-to-entry (mill-λ (`(,n ,template))
+			   (list n
+				 (vector
+				  (list n 'action
+					(mill-λ (but)
+					  (princ (format " %s" (button-label but))
+						 original-buffer)))
+				  template))))
+	 (entries (mapcar frame-to-entry frames)))
+    (mill--setup-tabulated-list-mode " *mill-frames*" format entries)))
 
 
 (defun mill--at-wordsense-line? ()
