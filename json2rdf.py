@@ -60,6 +60,7 @@ def to_graph(synsets_gen):
         wordsense_id = make_id(lang, lexicographer_file, wordsense[LEXICAL_FORM]
                                , wordsense[LEXICAL_ID], WORDSENSE)
         g.add((synset_id, WN30[CONTAINS_WORDSENSE], wordsense_id))
+        g.add((wordsense_id, WN30[LEXICAL_ID], Literal(wordsense[LEXICAL_ID])))
         g.add((wordsense_id, WN30[LEXICAL_FORM], Literal(wordsense[LEXICAL_FORM])))
         g.add((wordsense_id, WN30[SENSEKEY], Literal(wordsense[SENSEKEY])))
         for relation in wordsense[POINTERS]:

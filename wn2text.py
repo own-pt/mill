@@ -279,7 +279,8 @@ def check_conversion(original_file, new_file, rdf_format):
     ## don't export syntacticMarker yet, for instance)
     def new_uri(lexicographer_file, original_uri, wn_obj):
         if wn_obj == "synset":
-            wordsense = sort_word_senses(original_g, original_uri)[0]
+            sorted_wordsenses = sort_word_senses(original_g, original_uri)
+            wordsense = sorted_wordsenses[0]
         elif wn_obj == "wordsense":
             wordsense = original_uri
         else:
@@ -295,7 +296,7 @@ def check_conversion(original_file, new_file, rdf_format):
     original_g.parse(original_file, format=rdf_format)
     new_g.parse(new_file, format=rdf_format)
     for (original_en_synset, subj_lexfile) in original_g.subject_objects(LEXICOGRAPHER_FILE): # for every synset
-        for (predicate, obj) in original_g.predicate_objects(original_en_synset):
+        for (predicate, obj) in original_g.predicate_objects(original_en_synset): # for every relation
             obj_lexfile = original_g.value(obj, LEXICOGRAPHER_FILE, any=False)
             if predicate == CONTAINS_WORDSENSE:
                 original_en_wordsense = obj
@@ -306,7 +307,7 @@ def check_conversion(original_file, new_file, rdf_format):
                         new_en_wordsense = new_uri(subj_lexfile, original_en_wordsense, "wordsense")
                         new_en_obj = new_uri(obj_lexfile, obj, "wordsense")
                         if (new_en_wordsense, predicate, new_en_obj) not in new_g:
-                            print("wordsense relation {} missing between {} and {}".format(predicate, new_en_synset, new_en_obj))
+                            print("wordsense relation {} missing between {} and {}".format(predicate, new_en_wordsense, new_en_obj))
             elif obj_lexfile: # truthy if object is synset too
                 new_en_synset = new_uri(subj_lexfile, original_en_synset, "synset")
                 new_en_obj = new_uri(obj_lexfile, obj, "synset")
