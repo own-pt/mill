@@ -1,6 +1,9 @@
 module Parse (parseLexicographer) where
 
-import Data
+import Data ( Synset(..), LexicographerFileId(..), WNPOS, WNObj(..), SourceValidation
+            , Validation(..), Unvalidated, SynsetRelation(..), WNWord(..), WordSenseId(..)
+            , WordPointer(..), LexicalId(..), WordSenseForm(..), SourceError(..)
+            , SourcePosition(..), WNError(..), SynsetId(..), readLongWNPOS, toWNid)
 
 import Control.Applicative hiding (some,many)
 import qualified Control.Applicative.Combinators.NonEmpty as NC
@@ -85,28 +88,37 @@ lexicographerFile = do
   wnName     <- wnNameR
   _          <- lexicographerIdP wnName
   _          <- many linebreaks
-  rawSynsets <- synsets
+  lexicographerFileId  <- reader fst3
+  rawSynsets <- synsets lexicographerFileId
   _          <- eof
   return rawSynsets
 
-synsets :: Parser (NonEmpty RawSynset)
-synsets = synsetOrError `NC.sepEndBy1` many linebreak
+synsets :: LexicographerFileId -> Parser (NonEmpty RawSynset)
+synsets lexicographerFileId = synsetOrError `NC.sepEndBy1` many linebreak
   where
-    synsetOrError = withRecovery recover (Right <$> synset)
+    synsetOrError = withRecovery recover (Right <$> synset lexicographerFileId)
     recover :: ParseError Text Void -> Parser RawSynset
     recover err = Left err <$ manyTill anySingle (try $ count 2 linebreak)
 
-synset :: Parser (Synset Unvalidated)
-synset = do
-  startOffset      <- (1 +) <$> getOffset
-  lexicographerId  <- reader fst3
-  synsetWordSenses <- wordSenseStatement `NC.endBy1` linebreak
-  synsetDefinition <- definitionStatement <* linebreak
-  synsetExamples   <- exampleStatement `endBy` linebreak
-  synsetFrames     <- option [] (framesStatement <* linebreak)
-  synsetRelations  <- synsetRelationStatement `endBy` linebreak
-  endOffset        <- getOffset
-  return $ Synset (SourcePosition (startOffset, endOffset)) lexicographerId synsetWordSenses synsetDefinition synsetExamples synsetFrames synsetRelations
+synset :: LexicographerFileId -> Parser (Synset Unvalidated)
+synset lexicographerFileId = do
+  comments    <- commentsP
+  startOffset <- (1 +) <$> getOffset
+  wordSenses  <- wordSenseStatement `NC.endBy1` linebreak
+  definition  <- definitionStatement <* linebreak
+  examples    <- exampleStatement `endBy` linebreak
+  frames      <- option [] (framesStatement <* linebreak)
+  relations   <- synsetRelationStatement `endBy` linebreak
+  endOffset   <- getOffset
+  return $ Synset{ comments
+                 , sourcePosition = SourcePosition (startOffset, endOffset)
+                 , lexicographerFileId
+                 , wordSenses
+                 , definition
+                 , examples
+                 , frames
+                 , relations
+                 }
 
 spaceConsumer :: Monad m => ParsecT Void Text m ()
 -- comments will only be allowed as statements, because we want to
@@ -123,6 +135,11 @@ symbol = L.symbol spaceConsumer
 
 integer :: Parser Int
 integer = lexeme L.decimal
+
+commentsP :: Parser [Text]
+commentsP = commentLine `sepEndBy` linebreak
+  where
+    commentLine = char '#' *> lineText
 
 statement :: Text -> Parser a -> Parser a
 statement name parser = L.nonIndented spaceConsumer go

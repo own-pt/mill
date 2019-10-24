@@ -23,6 +23,22 @@
   display the definition of a synset related to the one at
   point.")
 
+(defvar mill-mode-syntax-table
+  (let ((st (make-syntax-table)))
+    ;; word components
+    (modify-syntax-entry ?. "w")
+    (modify-syntax-entry ?: "w")
+    (modify-syntax-entry ?- "w")
+    (modify-syntax-entry ?_ "w")
+    (modify-syntax-entry ?' "w")
+    (modify-syntax-entry ?@ "w")
+    ;; comments
+    ;;; actually comments are only valid at the beginning of synsets
+    (modify-syntax-entry ?# "<" st)
+    (modify-syntax-entry ?\n ">" st)
+    st)
+  "Syntax table for ‘mill-mode’.")
+
 ;; constants
 
 (defconst mill-frames-file-name
@@ -46,7 +62,7 @@
 
 (defconst mill--kwds-synset-rel
   (append mill-inter-wordnet-relations
-	  '("hm" "hp" "hs" "vg" "mm"
+	  '("hm" "hp" "hs" "vg" "mm" "fs"
 	    "mp" "ms" "sim" "entail"
 	    "drf" "mt" "mr" "mu" "dt"
 	    "dr" "du" "attr" "cause"
@@ -54,7 +70,7 @@
 	    "hypo" "ihypo" "sa" "su" "sb")))
 
 (defconst mill--kwds-word-rel
-  '("ant" "vg" "drf"
+  '("ant" "vg" "drf" "fs"
     "mt" "mr" "mu" "dt"
     "dr" "du" "pv" "pe"
     "see"))
@@ -365,39 +381,29 @@ Press RET or click to insert frame number at point."
 
 ;;;###autoload
 (define-derived-mode mill-mode fundamental-mode "mill"
-  "TODO: docstring"
+  "`mill-mode' is a major mode for WordNet lexicographer files maintained by the mill tool.
 
-;;; syntax-table
-  ;; word
-  (modify-syntax-entry ?. "w")
-  (modify-syntax-entry ?: "w")
-  (modify-syntax-entry ?- "w")
-  (modify-syntax-entry ?_ "w")
-  (modify-syntax-entry ?' "w")
-  (modify-syntax-entry ?@ "w")
-  
-
+See URL `https://github.com/own-pt/mill/'."
+  :syntax-table mill-mode-syntax-table
   ;; truncate-lines
   (setq-local truncate-lines t)
-
   ;; flymake
   (mill-setup-flymake-backend)
   (flymake-mode)
   (remove-hook 'after-change-functions 'flymake-after-change-function t)
-
   ;; fontification
   (setq font-lock-defaults
         `((,mill--font-lock-def-word-and-relations
 	   ,mill--font-lock-kwds-defs
 	   ,mill--font-lock-synset-relation)
 	  nil))
-
   ;; to be able to use M-a and M-e to jump
   (setq-local sentence-end ".$$")
-
+  ;; to be able to use M-; to comment region
+  (setq-local comment-start "# ")
+  (setq-local comment-end "")
   ;; xref
   (add-hook 'xref-backend-functions #'mill--xref-backend nil t)
-
   ;; indentation
   (setq-local indent-line-function 'mill--indent-line))
 

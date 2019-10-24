@@ -183,13 +183,14 @@ data Unvalidated deriving (Binary,Generic)
 data Validated
 
 data Synset a = Synset
-  { sourcePosition       :: SourcePosition
-  , lexicographerFileId  :: LexicographerFileId
-  , wordSenses           :: NonEmpty WNWord
-  , definition           :: Text
-  , examples             :: [Text]
-  , frames               :: [Int]
-  , relations            :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
+  { comments            :: [Text]
+  , sourcePosition      :: SourcePosition
+  , lexicographerFileId :: LexicographerFileId
+  , wordSenses          :: NonEmpty WNWord
+  , definition          :: Text
+  , examples            :: [Text]
+  , frames              :: [Int]
+  , relations           :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
   } deriving (Binary,Eq,Generic,Show)
 
 instance Ord (Synset Validated) where

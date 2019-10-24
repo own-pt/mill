@@ -35,7 +35,7 @@ uncurry3 f (a,b,c) = f a b c
 -- JSON/aeson
 synsetToJSON :: Map Text Text -> Map Text Int -> Synset Validated -> Value
 synsetToJSON textToCanonicNames lexNamesToLexNum
-  Synset{wordSenses = wordSenses@(WNWord headWordId@(WordSenseId wnId@WNid{pos}) _ _:|_), ..}
+  Synset{comments, wordSenses = wordSenses@(WNWord headWordId@(WordSenseId wnId@WNid{pos}) _ _:|_), ..}
   = object
   [ "id"         .= headWordId
   , "wordsenses" .= NE.map toWordSense wordSenses
@@ -44,6 +44,7 @@ synsetToJSON textToCanonicNames lexNamesToLexNum
   , "frames"     .= frames
   , "relations"  .= map (\(SynsetRelation name targetIdentifier) -> toRelation name targetIdentifier) relations
   , "position"   .= sourcePosition
+  , "comments"   .= comments
   ]
   where
     toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "id" .= wnIdentifier]

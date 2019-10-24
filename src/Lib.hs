@@ -25,7 +25,7 @@ import Validate ( makeIndex, Index, indexSynsets, oneLangIndex
 import Control.Monad (unless,mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Bifunctor (Bifunctor(..))
-import Data.Binary (encodeFile,decodeFile)
+import Data.Binary (encodeFile,decodeFileOrFail)
 import Data.ByteString.Builder (hPutBuilder)
 import Data.Either (partitionEithers)
 import Data.List (intercalate, find, intersperse)
@@ -275,8 +275,10 @@ readCachedFileIndex :: Maybe Text -> FilePath
 readCachedFileIndex oneLang lexFilePath = do
   let (dirPath, filePath) = splitFileName lexFilePath
       indexPath = dirPath </> ".cache" </> filePath <.> "index"
-  index' <- decodeFile indexPath
-  return $ bimap id (oneLangIndex oneLang) index'
+  decodeResult <- decodeFileOrFail indexPath
+  case decodeResult of
+    Left (_, message) -> error $ unwords ["You probably have a corrupted cache; please delete it and try again\nFailed with message:", message]
+    Right index' -> return $ bimap id (oneLangIndex oneLang) index'
 
 ---
 -- cache

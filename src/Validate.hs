@@ -90,15 +90,16 @@ indexKey WNid{wnName, pos, lexname, lexForm = WordSenseForm wordForm, lexId = Le
 ---
 -- checks
 checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
-checkSynset index Synset{lexicographerFileId, wordSenses, relations, definition
-                        , examples, frames, sourcePosition} =
+checkSynset index Synset{comments, lexicographerFileId, wordSenses, relations
+                        , definition, examples, frames, sourcePosition} =
   case result of
     Success synset -> Success synset
     Failure errors -> Failure $ NE.map (SourceError lexfileName sourcePosition) errors
   where
     lexfileName = lexicographerFileIdToText lexicographerFileId
     result = Synset
-      <$> Success sourcePosition
+      <$> Success comments
+      <*> Success sourcePosition
       <*> Success lexicographerFileId
       <*> checkWordSenses index wordSenses
       <*> Success definition
