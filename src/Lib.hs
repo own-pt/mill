@@ -205,7 +205,7 @@ getValidated = do
   -- can't merge them now because we need to validate the synsets from
   -- each file as a unit, or else we get spurious sort errors
   validationIndices <- liftIO $ sequenceA <$> mapM (readCachedFileIndex oneLang) lexFilePaths
-  let validationIndex   = bimap id sconcat validationIndices
+  let validationIndex = bimap id sconcat validationIndices
   case (validationIndex, validationIndices) of
     (Failure parseErrors, _)
       -> return $ Failure parseErrors

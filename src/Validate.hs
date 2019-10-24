@@ -199,20 +199,13 @@ validateSynsets :: Index (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
 -- | validates synsets from the same lexicographer file against index
 validateSynsets index (firstSynset:|synsets) =
-  checkSynsetsOrder checkedSynsets
+  (:|)
+  <$> checkSynset' firstSynset
+  <*> foldr go (Success []) synsets
   where
-    checkSynsetsOrder (Success validatedSynsets)
-      = bimap (NE.map toError) NE.fromList . validateSorted $ NE.toList validatedSynsets
-    checkSynsetsOrder (Failure es) = Failure es
-    toError unsortedSynsetSequences@(synset:|_)
-      = toSourceError synset $ UnsortedSynsets (unsortedSynsetSequences :| [])
-    checkedSynsets
-      = (:|)
-      <$> checkSynset' firstSynset
-      <*> foldr go (Success []) synsets
-      where
-        checkSynset' = checkSynset index
-        go synset result = (:) <$> checkSynset' synset <*> result
+    checkSynset' = checkSynset index
+    go synset result = (:) <$> checkSynset' synset <*> result
+
 
 indexSynsets :: Index (Synset Unvalidated) -> [Synset Unvalidated]
 indexSynsets = concatMap (either (const []) (:[]) . snd) . toAscList
