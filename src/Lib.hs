@@ -1,5 +1,6 @@
 module Lib
-    ( parseLexicographerFile
+    ( Config(..)
+    , parseLexicographerFile
     , parseLexicographerFiles
     , build
     , validateLexicographerFile
@@ -45,7 +46,7 @@ import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
 import Development.Shake.FilePath ((<.>), (-<.>), splitFileName, takeDirectory)
 import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryIfMissing
-                        , doesDirectoryExist, withCurrentDirectory )
+                        , doesDirectoryExist, doesPathExist, withCurrentDirectory )
 import System.FilePath ((</>), normalise, equalFilePath)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
 
@@ -91,11 +92,14 @@ readTSV readLine input =
     isComment _ = False
 
 readConfig :: Maybe Text -> FilePath -> IO Config
-readConfig oneLang configurationDir' = do
-  configurationDir   <- canonicalizePath configurationDir'
-  isDirectory        <- doesDirectoryExist configurationDir
-  unless isDirectory (error "Filepath must be a directory")
-  go configurationDir
+readConfig oneLang configurationPath' = do
+  configurationPath <- canonicalizePath configurationPath'
+  pathExists        <- doesPathExist configurationPath
+  unless pathExists (error "Configuration directory must exist")
+  isDirectory       <- doesDirectoryExist configurationPath
+  if isDirectory
+    then go configurationPath
+    else go $ takeDirectory configurationPath
   where
     readTSVwith filePath reader = readTSV reader <$> TIO.readFile filePath
     go configurationDir = do
