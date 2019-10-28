@@ -1,6 +1,7 @@
 module Main where
 
-import Lib ( validateLexicographerFile
+import Lib ( canonicalDir
+           , validateLexicographerFile
            , validateLexicographerFiles
            , lexicographerFilesJSON
            , readConfig
@@ -111,8 +112,10 @@ main = do
           -> export configDir oneLang format inputPath outputPath
 
 getConfig :: ConfigDir -> OneLanguage -> FilePath -> IO Config
-getConfig configDir oneLang fallbackPath =
-  readConfig oneLang $ fromMaybe fallbackPath configDir
+getConfig configDir' oneLang wnPath' = do
+  wnPath    <- canonicalDir wnPath'
+  configDir <- canonicalDir $ fromMaybe wnPath' configDir'
+  readConfig oneLang wnPath configDir
 
 validate :: ConfigDir -> OneLanguage -> FilePath -> IO ()
 validate configDir oneLang inputPath = do

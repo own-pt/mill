@@ -18,8 +18,8 @@ import qualified Data.Map.Strict as M
 import Data.String (IsString)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest
-                                 , line, indent, align, vsep, hsep)
+import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest, encloseSep
+                                 , line, indent, align, vsep, squotes)
 import GHC.Generics (Generic)
 import Text.Printf (printf)
 
@@ -309,7 +309,8 @@ prettyUnordered what sequences
   <> (indent 2 . align . vsep . map prettyUnorderedSequence $ NE.toList sequences)
   where
     prettyUnorderedSequence (x:|xs) =
-      pretty x <+> "should come after" <+> hsep (map pretty xs)
+      squotes (pretty x) <+> "should come after"
+      <+> encloseSep "" "" ", " (map (squotes . pretty) xs)
 
 prettyDuplicate :: Pretty a => Text -> NonEmpty a -> Doc ann
 prettyDuplicate what duplicates

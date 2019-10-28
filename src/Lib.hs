@@ -1,5 +1,6 @@
 module Lib
     ( Config(..)
+    , canonicalDir
     , parseLexicographerFile
     , parseLexicographerFiles
     , build
@@ -68,10 +69,9 @@ data Config = Config
   -- | maps relation names in text files to their (original)
   -- lexicographer file names/symbols
   , textToLexRelations :: Map Text Text
-  -- | where configuration files lie, the index gets written, etc. In
-  -- a multilanguage setting, only the files in this directory get
-  -- written to output formats
-  , wnDir :: FilePath
+  -- | where the index gets written, etc. In a multilanguage setting,
+  -- only the files in this directory get written to output formats
+  , mainWNDir :: FilePath
   } deriving (Show,Eq)
 
 
@@ -91,54 +91,54 @@ readTSV readLine input =
     isComment [field] = T.take 2 field == "--"
     isComment _ = False
 
-readConfig :: Maybe Text -> FilePath -> IO Config
-readConfig oneLang configurationPath' = do
-  configurationPath <- canonicalizePath configurationPath'
-  pathExists        <- doesPathExist configurationPath
-  unless pathExists (error "Configuration directory must exist")
-  isDirectory       <- doesDirectoryExist configurationPath
-  if isDirectory
-    then go configurationPath
-    else go $ takeDirectory configurationPath
+canonicalDir :: FilePath -> IO FilePath
+canonicalDir filepath' = do
+  filepath    <- canonicalizePath filepath'
+  pathExists  <- doesPathExist filepath
+  unless pathExists (error $ "Path " ++  filepath' ++ " does not exist")
+  isDirectory <- doesDirectoryExist filepath
+  return $ if isDirectory then filepath else takeDirectory filepath
+  
+
+readConfig :: Maybe Text -> FilePath -> FilePath -> IO Config
+readConfig oneLang wnPath configurationDir = do
+  lexNamesInput              <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
+  relationsInput             <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
+  (wnNames, wnRelativePaths) <- unzip <$> readTSVwith (configurationDir </> "wns.tsv") wnsReader
+  wnAbsolutePaths            <- mapM toAbsolutePath wnRelativePaths
+  let lexnamesToId       = toMap toLexnamesToId lexNamesInput
+      textToCanonicNames = toMap toTextToCanonicName relationsInput
+      canonicToDomain    = toMap toCanonicToDomain relationsInput
+      textToLexRelations = toMap toTextToLexRelations relationsInput
+      wnPaths            = toMap id $ zip wnNames wnAbsolutePaths
+  return $ Config { oneLang, lexnamesToId, textToCanonicNames
+                  , canonicToDomain, textToLexRelations
+                  , mainWNDir = wnPath, wnPaths
+                  }
   where
     readTSVwith filePath reader = readTSV reader <$> TIO.readFile filePath
-    go configurationDir = do
-      lexNamesInput              <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
-      relationsInput             <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
-      (wnNames, wnRelativePaths) <- unzip <$> readTSVwith (configurationDir </> "wns.tsv") wnsReader
-      wnAbsolutePaths            <- mapM toAbsolutePath wnRelativePaths
-      let lexnamesToId       = toMap toLexnamesToId lexNamesInput
-          textToCanonicNames = toMap toTextToCanonicName relationsInput
-          canonicToDomain    = toMap toCanonicToDomain relationsInput
-          textToLexRelations = toMap toTextToLexRelations relationsInput
-          wnPaths            = toMap id $ zip wnNames wnAbsolutePaths
-      return $ Config { oneLang, lexnamesToId, textToCanonicNames
-                      , canonicToDomain, textToLexRelations
-                      , wnDir = configurationDir, wnPaths
-                      }
-        where
-          toMap f = M.fromList . map f
-          toAbsolutePath wnPath
-            = withCurrentDirectory configurationDir (canonicalizePath $ T.unpack wnPath)
-          toLexnamesToId (lexFileName, lexNameId) = (lexFileName, lexNameId)
-          toTextToCanonicName (canonicName,_,textName,_) = (textName, canonicName)
-          toCanonicToDomain (canonicName, _,_, domain) = (canonicName, domain)
-          toTextToLexRelations (_,lexName, textName,_) = (textName, lexName)
-          lexnamesReader [lexnameIdStr, lexicographerFile, _] =
-            case TR.decimal lexnameIdStr of
-              Left err -> Left err
-              Right (lexnameId, "") -> Right [(lexicographerFile, lexnameId :: Int)]
-              Right (_, trailing) -> Left $ "Trailing garbage after " ++ T.unpack trailing
-          lexnamesReader _ = Left "Wrong number of fields in lexnames.tsv"
-          relationsReader [_,_,"_",_,_,_,_] = Right []
-          relationsReader [canonicName,lexName,textName,_,pos,domain,_]
-            = Right [(canonicName, lexName, textName
-                     , (readListField readWNObj domain, readListField readShortWNPOS pos))
-                    ]
-          relationsReader _ = Left "Wrong number of fields in relations.tsv"
-          wnsReader [wnName, wnPath] = Right [(wnName, wnPath)]
-          wnsReader _ = Left "Wrong number of fiels in wns.tsv"
-          readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
+    toMap f = M.fromList . map f
+    toAbsolutePath relativePath
+      = withCurrentDirectory wnPath (canonicalizePath $ T.unpack relativePath)
+    toLexnamesToId (lexFileName, lexNameId) = (lexFileName, lexNameId)
+    toTextToCanonicName (canonicName,_,textName,_) = (textName, canonicName)
+    toCanonicToDomain (canonicName, _,_, domain) = (canonicName, domain)
+    toTextToLexRelations (_,lexName, textName,_) = (textName, lexName)
+    lexnamesReader [lexnameIdStr, lexicographerFile, _] =
+      case TR.decimal lexnameIdStr of
+        Left err -> Left err
+        Right (lexnameId, "") -> Right [(lexicographerFile, lexnameId :: Int)]
+        Right (_, trailing) -> Left $ "Trailing garbage after " ++ T.unpack trailing
+    lexnamesReader _ = Left "Wrong number of fields in lexnames.tsv"
+    relationsReader [_,_,"_",_,_,_,_] = Right []
+    relationsReader [canonicName,lexName,textName,_,pos,domain,_]
+      = Right [(canonicName, lexName, textName
+               , (readListField readWNObj domain, readListField readShortWNPOS pos))
+              ]
+    relationsReader _ = Left "Wrong number of fields in relations.tsv"
+    wnsReader [wnName, relativePath] = Right [(wnName, relativePath)]
+    wnsReader _ = Left "Wrong number of fiels in wns.tsv"
+    readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
                                                                  
 
 type App = ReaderT Config IO
@@ -288,9 +288,9 @@ readCachedFileIndex oneLang lexFilePath = do
 -- cache
 build :: App ()
 build = do
-  config@Config{wnDir} <- ask
+  config@Config{mainWNDir} <- ask
   lexFiles <- wnLexFiles
-  let shakeDir = wnDir </> ".cache"
+  let shakeDir = mainWNDir </> ".cache"
   liftIO . shake shakeOptions{ shakeFiles=shakeDir, shakeThreads=0 }
     $ do
     -- targets
