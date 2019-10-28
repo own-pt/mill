@@ -8,6 +8,8 @@ from rdflib.namespace import RDF
 from rdflib.term import Literal
 import click
 
+# [] join json2rdf and rdf2text into mill.py
+
 WN30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
 WN30EN = Namespace("https://w3id.org/own-pt/wn30-en/instances/")
 WN30PT = Namespace("https://w3id.org/own-pt/wn30-pt/instances/") # not used (yet)
@@ -16,6 +18,7 @@ WN30_LANG = {"en": WN30EN, "pt": WN30PT}
 
 ###
 ## json -> rdf
+COMMENT            = "comment"
 DEFINITION         = "definition"
 EXAMPLE            = "example"
 LEXICOGRAPHER_FILE = "lexicographerFile"
@@ -73,6 +76,10 @@ def to_graph(synsets_gen):
         g.add((synset_id, RDF.type, synset_type))
         g.add((synset_id, WN30[LEXICOGRAPHER_FILE], lexicographer_file))
         g.add((synset_id, WN30[DEFINITION], Literal(synset[DEFINITION])))
+        comments = synset[COMMENTS]
+        if comments:
+            comment = "\n".join(comments)
+            g.add((synset_id, WN30[COMMENT], Literal(comment)))
         for example in synset[EXAMPLES]:
             g.add((synset_id, WN30[EXAMPLE], Literal(example)))
         for wordsense in synset[WORDSENSES]:
