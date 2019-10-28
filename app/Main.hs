@@ -28,32 +28,32 @@ data MillCommand = MillCommand ConfigDir OneLanguage MillSubCommand
 
 data MillSubCommand 
   = Validate FilePath
-  | Export ExportFormat FilePath
+  | Export ExportFormat FilePath FilePath
              deriving (Show)
 
 showHelpOnErrorExecParser :: ParserInfo a -> IO a
 showHelpOnErrorExecParser = customExecParser (prefs showHelpOnError)
 
-parseCommand :: Parser MillCommand
-parseCommand = MillCommand <$> configDir <*> oneLanguage <*> parseSubCommand
+parseSubCommand :: Parser MillSubCommand -> Parser MillCommand
+parseSubCommand subcommand = MillCommand <$> configDir <*> oneLanguage <*> subcommand
   where
     configDir = option (Just <$> str)
       (metavar "CONFIGDIR" <> short 'c' <> long "config-dir"
        <> help "Directory where configuration files are in"
        <> value Nothing)
 
-parseSubCommand :: Parser MillSubCommand
-parseSubCommand = hsubparser $
+parseCommand :: Parser MillCommand
+parseCommand = hsubparser $
   -- validate
   command
    "validate"
-   (info (helper <*> parseValidateCommand)
+   (info (helper <*> parseSubCommand parseValidateCommand)
    (fullDesc <> progDesc "Validate lexicographer files"))
   <>
   -- export
   command
    "export"
-   (info (helper <*> parseExportCommand)
+   (info (helper <*> parseSubCommand parseExportCommand)
    (fullDesc <> progDesc "Export lexicographer files"))
 
 parseOneLanguage :: ReadM OneLanguage
@@ -85,9 +85,11 @@ parseExportCommand = exportParser
     jsonFlag = flag WNJSON WNJSON (long "json" <> help "Export to JSON format [default]")
     wndbFlag = flag WNJSON WNDB   (long "wndb" <> help "Export to WNDB format")
     exportParser
-      = Export <$> (jsonFlag <|> wndbFlag) <*> outputPath
+      = Export <$> (jsonFlag <|> wndbFlag) <*> inPath <*> outputPath
+    inPath = argument str
+      (metavar "INPATH" <> help "Input path. If configuration directory was not provided, it is assumed to be in the same path.")
     outputPath = argument str
-      (metavar "PATH" <> help "Output path. If configuration directory was not provided, it is assumed to be in the same path.")
+      (metavar "OUTPATH" <> help "Output path.")
 
 millProgDesc :: String
 millProgDesc =
@@ -100,12 +102,13 @@ main :: IO ()
 main = do
   commandToRun <- showHelpOnErrorExecParser
     $ info (helper <*> parseCommand)
-    (fullDesc <> progDesc millProgDesc <> header "wntext")
+    (fullDesc <> progDesc millProgDesc <> header "mill")
   case commandToRun of
     MillCommand configDir oneLang subcommand ->
       case subcommand of
         Validate inputPath -> validate configDir oneLang inputPath
-        Export format outputPath -> export configDir oneLang format outputPath
+        Export format inputPath outputPath
+          -> export configDir oneLang format inputPath outputPath
 
 getConfig :: ConfigDir -> OneLanguage -> FilePath -> IO Config
 getConfig configDir oneLang fallbackPath =
@@ -120,9 +123,9 @@ validate configDir oneLang inputPath = do
                else validateLexicographerFile inputPath)
     config
 
-export :: ConfigDir -> OneLanguage -> ExportFormat -> FilePath -> IO ()
-export configDir oneLang format outputPath = do
-  config <- getConfig configDir oneLang outputPath
+export :: ConfigDir -> OneLanguage -> ExportFormat -> FilePath -> FilePath -> IO ()
+export configDir oneLang format inputPath outputPath = do
+  config <- getConfig configDir oneLang inputPath
   case format of
     WNJSON -> exportJSON outputPath config
     WNDB -> exportWNDB outputPath config
