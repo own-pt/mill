@@ -18,9 +18,17 @@ WN30_LANG = {"en": WN30EN, "pt": WN30PT}
 
 ###
 ## json -> rdf
+POS1TOLONG = {"A" : "adj", "N" : "noun", "R" : "adv", "S" : "adjs", "V" : "verb"}
+SYNSETTYPE = {"A" : Literal("AdjectiveSynset"), "N" :
+              Literal("NounSynset"), "R" : Literal("AdverbSynset"),
+              "S" : Literal("AdjectiveSatelliteSynset"), "V" :
+              Literal("VerbSynset")}
+
 COMMENT            = "comment"
+COMMENTS           = "comments"
 DEFINITION         = "definition"
 EXAMPLE            = "example"
+LANG               = "lang"
 LEXICOGRAPHER_FILE = "lexicographerFile"
 ID                 = "id"
 EXAMPLES           = "examples"
@@ -29,6 +37,7 @@ CONTAINS_WORDSENSE = "containsWordSense"
 LEXICAL_FORM       = "lexicalForm"
 LEXICAL_ID         = "lexicalId"
 POINTERS           = "pointers"
+POSITION           = "position"
 NAME               = "name"
 SENSEKEY           = "senseKey"
 FRAME              = "frame"
@@ -36,6 +45,8 @@ FRAMES             = "frames"
 WORDSENSE          = "wordsense"
 SYNSET             = "synset"
 RELATIONS          = "relations"
+SOURCE_BEGIN       = "sourceBegin"
+SOURCE_END         = "sourceEnd"
 
 def from_json(json_input):
     for line in json_input:
@@ -73,9 +84,13 @@ def to_graph(synsets_gen):
 
     def add_synset(synset):
         lang, synset_id, lexicographer_file, synset_type = parse_id(synset[ID])
+        g.add((synset_id, WN30[LANG], Literal(lang)))
         g.add((synset_id, RDF.type, synset_type))
         g.add((synset_id, WN30[LEXICOGRAPHER_FILE], lexicographer_file))
         g.add((synset_id, WN30[DEFINITION], Literal(synset[DEFINITION])))
+        [begin, end] = synset[POSITION]
+        g.add((synset_id, WN30[SOURCE_BEGIN], Literal(begin)))
+        g.add((synset_id, WN30[SOURCE_END], Literal(end)))
         comments = synset[COMMENTS]
         if comments:
             comment = "\n".join(comments)
@@ -88,8 +103,7 @@ def to_graph(synsets_gen):
             add_relation(synset_id, relation)
         for frame in synset[FRAMES]:
             add_frame(synset_id, frame)
-
-
+    #
     g = Graph()
     for synset in synsets_gen:
         add_synset(synset)
@@ -106,11 +120,6 @@ def json_to_rdf(json_input, rdf_output, rdf_format='nt'):
     graph = to_graph(from_json(json_input))
     graph.serialize(destination=rdf_output, format=rdf_format)
 
-POS1TOLONG = {"A" : "adj", "N" : "noun", "R" : "adv", "S" : "adjs", "V" : "verb"}
-SYNSETTYPE = {"A" : Literal("AdjectiveSynset"), "N" :
-              Literal("NounSynset"), "R" : Literal("AdverbSynset"),
-              "S" : Literal("AdjectiveSatelliteSynset"), "V" :
-              Literal("VerbSynset")}
 
 if __name__ == '__main__':
     json_to_rdf()
