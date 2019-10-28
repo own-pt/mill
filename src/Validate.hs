@@ -103,8 +103,8 @@ checkSynset index Synset{comments, lexicographerFileId, wordSenses, relations
       <*> Success lexicographerFileId
       <*> checkWordSenses index wordSenses
       <*> Success definition
-      <*> Success examples
-      <*> Success frames -- [ ] check frames
+      <*> checkSortNoDuplicates UnsortedExamples DuplicateExamples examples
+      <*> checkSortNoDuplicates UnsortedFrames DuplicateFrames frames
       <*> checkSynsetRelations index relations
 
 

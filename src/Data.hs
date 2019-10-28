@@ -189,7 +189,7 @@ data Synset a = Synset
   , wordSenses          :: NonEmpty WNWord
   , definition          :: Text
   , examples            :: [Text]
-  , frames              :: [Int]
+  , frames              :: [FrameId]
   , relations           :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
   } deriving (Binary,Eq,Generic,Show)
 
@@ -242,11 +242,15 @@ validation _ g (Success a) = g a
 data WNError
   = ParseError String
   | DuplicateWordSense String
+  | DuplicateExamples (NonEmpty Text)
+  | DuplicateFrames (NonEmpty FrameId)
   | DuplicateSynsetWords (NonEmpty Text)
   | DuplicateWordRelation (NonEmpty WordPointer)
   | DuplicateSynsetRelation (NonEmpty SynsetRelation)
   | MissingSynsetRelationTarget SynsetRelation
   | MissingWordRelationTarget WordPointer
+  | UnsortedExamples (NonEmpty (NonEmpty Text))
+  | UnsortedFrames (NonEmpty (NonEmpty FrameId))
   | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
   | UnsortedWordSenses (NonEmpty (NonEmpty Text))
   | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
@@ -317,6 +321,10 @@ instance Pretty WNError where
   pretty (ParseError errorString) = pretty errorString
   pretty (DuplicateWordSense sensekey)
     = prettyDuplicate "wordsense" (singleton sensekey)
+  pretty (DuplicateExamples examples)
+    = prettyDuplicate "examples" examples
+  pretty (DuplicateFrames frames)
+    = prettyDuplicate "frame IDs" frames
   pretty (DuplicateSynsetWords synsetWords)
     = prettyDuplicate "synset words" synsetWords
   pretty (DuplicateWordRelation wordPointers)
@@ -327,6 +335,10 @@ instance Pretty WNError where
     = prettyMissingTarget "synset relation" relationName $ pretty target
   pretty (MissingWordRelationTarget (WordPointer pointerName target))
     = prettyMissingTarget "word pointer" pointerName $ pretty target
+  pretty (UnsortedExamples sequences)
+    = prettyUnordered "examples" sequences
+  pretty (UnsortedFrames sequences)
+    = prettyUnordered "synset IDs" sequences
   pretty (UnsortedSynsets sequences)
     = prettyUnordered "synsets" sequences
   pretty (UnsortedSynsetRelations sequences)
