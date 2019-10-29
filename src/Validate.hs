@@ -13,9 +13,9 @@ module Validate
   ) where
 
 import Data (Synset(..), Unvalidated, Validated, SourceValidation
-            ,WNWord(..), WNid(..),SynsetId(..), Validation(..), WordSenseForm(..), LexicalId(..)
-            ,SynsetRelation(..),WordPointer(..), WNValidation,WNError(..)
-            ,WordSenseId(..),SourceError(..),singleton,toSourceError,lexicographerFileIdToText)
+            , WSense(..), WNid(..),SynsetId(..), Validation(..), WordSenseForm(..), LexicalId(..)
+            , SynsetRelation(..),WordPointer(..), WNValidation, WNError(..), WNPOS(..), LexicographerFileId(..)
+            , WordSenseId(..),SourceError(..), WNExtra(..), singleton,toSourceError,lexicographerFileIdToText)
 
 import Data.Bifunctor (bimap)
 import Data.Coerce (coerce)
@@ -69,8 +69,8 @@ checkIndexNoDuplicates index =
                 . DuplicateWordSense $ takeWhile (/= '\t') key)
             $ NE.toList values
 
-wordSenseKey :: WNWord -> String
-wordSenseKey (WNWord wnWordId _ _)
+wordSenseKey :: WSense -> String
+wordSenseKey (WSense wnWordId _ _)
   = indexKey $ coerce wnWordId
 
 indexKey :: WNid -> String
@@ -91,12 +91,13 @@ indexKey WNid{wnName, pos, lexname, lexForm = WordSenseForm wordForm, lexId = Le
 -- checks
 checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
 checkSynset index Synset{comments, lexicographerFileId, wordSenses, relations
-                        , definition, examples, frames, sourcePosition} =
+                        , definition, examples, extra, sourcePosition} =
   case result of
     Success synset -> Success synset
     Failure errors -> Failure $ NE.map (SourceError lexfileName sourcePosition) errors
   where
     lexfileName = lexicographerFileIdToText lexicographerFileId
+    synsetPOS = pos (lexicographerFileId :: LexicographerFileId)
     result = Synset
       <$> Success comments
       <*> Success sourcePosition
@@ -104,8 +105,10 @@ checkSynset index Synset{comments, lexicographerFileId, wordSenses, relations
       <*> checkWordSenses index wordSenses
       <*> Success definition
       <*> checkSortNoDuplicates UnsortedExamples DuplicateExamples examples
-      <*> checkSortNoDuplicates UnsortedFrames DuplicateFrames frames
       <*> checkSynsetRelations index relations
+      -- actually can't have syntactic marker in synset, but parser
+      -- won't allow it anyway
+      <*> checkExtra synsetPOS extra
 
 
 --- use <*> for validation, or <*? see
@@ -164,7 +167,7 @@ checkSortNoDuplicates toSortError toDuplicateError = sortedCheckNoDuplicates . v
     sortedCheckNoDuplicates (Success xs)
       = bimap (singleton . toDuplicateError) id $ validateNoDuplicates xs
 
-checkWordSenses :: Index a -> NonEmpty WNWord -> WNValidation (NonEmpty WNWord)
+checkWordSenses :: Index a -> NonEmpty WSense -> WNValidation (NonEmpty WSense)
 checkWordSenses index wordSenses
   =  checkWordSensesOrderNoDuplicates
   *> traverse (checkWordSense index) wordSenses
@@ -172,14 +175,16 @@ checkWordSenses index wordSenses
   where
     checkWordSensesOrderNoDuplicates
       = checkSortNoDuplicates UnsortedWordSenses DuplicateSynsetWords . map wordSenseLexicalForm $ NE.toList wordSenses
-    wordSenseLexicalForm (WNWord (WordSenseId WNid{lexForm = WordSenseForm lexicalForm}) _ _) = lexicalForm
+    wordSenseLexicalForm (WSense (WordSenseId WNid{lexForm = WordSenseForm lexicalForm}) _ _) = lexicalForm
 
-checkWordSense :: Index a -> WNWord -> WNValidation WNWord
-checkWordSense index wordSense@(WNWord _ _ wordPointers)
+checkWordSense :: Index a -> WSense -> WNValidation WSense
+checkWordSense index wordSense@(WSense wID extra wordPointers)
   =  checkWordSensePointersOrderNoDuplicates
   *> checkWordSensePointersTargets index wordPointers
+  *> checkExtra wordPOS extra
   *> Success wordSense
   where
+    wordPOS = pos (coerce wID :: WNid)
     checkWordSensePointersOrderNoDuplicates =
       checkSortNoDuplicates UnsortedWordPointers DuplicateWordRelation wordPointers
     
@@ -194,6 +199,16 @@ checkWordSensePointersTargets index = traverse checkWordPointer
       else Failure (MissingWordRelationTarget wordPointer :| []) -- []
       where
         targetSenseKey = indexKey $ coerce wnWordId
+
+checkExtra :: WNPOS -> WNExtra -> WNValidation WNExtra
+checkExtra _ WNEmpty = Success WNEmpty
+checkExtra A (WNAdj marker) = Success (WNAdj marker)
+checkExtra S (WNAdj marker) = Success (WNAdj marker)
+checkExtra V (WNVerb frames) = fmap WNVerb checkedFrames
+  where
+    checkedFrames = fmap NE.fromList . checkSortNoDuplicates UnsortedFrames DuplicateFrames $ NE.toList frames
+checkExtra _ (WNAdj _) = Failure $ singleton MarkerNonAdj
+checkExtra _ (WNVerb _) = Failure $ singleton FramesNonVerb
 
 validateSynsets :: Index (Synset Unvalidated)
   -> NonEmpty (Synset Unvalidated)
@@ -225,8 +240,8 @@ oneLangIndex (Just lang)
       = Right s{relations = filter oneLang relations, wordSenses = NE.map oneLangWordSense wordSenses}
       where
         oneLang (SynsetRelation _ (SynsetId WNid{wnName})) = wnName == lang
-        oneLangWordSense (WNWord wID fs pointers)
-          = WNWord wID fs
+        oneLangWordSense (WSense wID fs pointers)
+          = WSense wID fs
           $ filter oneLangPointer pointers
         oneLangPointer (WordPointer _ (WordSenseId WNid{wnName})) = wnName == lang
 

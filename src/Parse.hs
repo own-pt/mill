@@ -1,9 +1,10 @@
 module Parse (parseLexicographer) where
 
 import Data ( Synset(..), LexicographerFileId(..), WNPOS, WNObj(..), SourceValidation
-            , Validation(..), Unvalidated, SynsetRelation(..), WNWord(..), WordSenseId(..)
+            , Validation(..), Unvalidated, SynsetRelation(..), WSense(..), WordSenseId(..)
             , WordPointer(..), LexicalId(..), WordSenseForm(..), SourceError(..)
-            , SourcePosition(..), WNError(..), SynsetId(..), readLongWNPOS, toWNid)
+            , SourcePosition(..), WNError(..), SynsetId(..), WNExtra(..), FrameId
+            , readLongWNPOS, toWNid)
 
 import Control.Applicative hiding (some,many)
 import qualified Control.Applicative.Combinators.NonEmpty as NC
@@ -93,6 +94,9 @@ lexicographerFile = do
   _          <- eof
   return rawSynsets
 
+emptyExtra :: Parser WNExtra
+emptyExtra = pure WNEmpty
+
 synsets :: LexicographerFileId -> Parser (NonEmpty RawSynset)
 synsets lexicographerFileId = synsetOrError `NC.sepEndBy1` many linebreak
   where
@@ -107,7 +111,7 @@ synset lexicographerFileId = do
   wordSenses  <- wordSenseStatement `NC.endBy1` linebreak
   definition  <- definitionStatement <* linebreak
   examples    <- exampleStatement `endBy` linebreak
-  frames      <- option [] (framesStatement <* linebreak)
+  extra       <- (fmap WNVerb framesStatement <|> emptyExtra) <* linebreak
   relations   <- synsetRelationStatement `endBy` linebreak
   endOffset   <- getOffset
   return $ Synset{ comments
@@ -116,13 +120,13 @@ synset lexicographerFileId = do
                  , wordSenses
                  , definition
                  , examples
-                 , frames
+                 , extra
                  , relations
                  }
 
 spaceConsumer :: Monad m => ParsecT Void Text m ()
--- comments will only be allowed as statements, because we want to
--- serialize to this format too
+-- only whole line comments at the start of the synset are allowed,
+-- because we want to serialize to this format too
 spaceConsumer = L.space spaces empty empty
   where
     spaces = void $ takeWhile1P Nothing (== ' ')
@@ -185,13 +189,15 @@ relationNameP obj name = do
   where
     toErrorItem = Label . NE.fromList . show
 
-wordSenseStatement :: Parser WNWord
+wordSenseStatement :: Parser WSense
 wordSenseStatement = statement "w" go
   where
-    go = WNWord <$> wordSenseIdentifier <*> wordSenseFrames <* wordSenseMarker
-                <*> wordSensePointers
-    wordSenseFrames = option [] $ symbol "fs" *> frameNumbers
-    wordSenseMarker = optional $ symbol "marker" *> word
+    go = WSense
+      <$> wordSenseIdentifier
+      <*> (wordSenseFrames <|> wordSenseMarker <|> emptyExtra)
+      <*> wordSensePointers
+    wordSenseFrames = fmap WNVerb $ symbol "fs" *> frameNumbers
+    wordSenseMarker = fmap WNAdj $ symbol "marker" *> word
 
 wordSenseIdentifier :: Parser WordSenseId
 wordSenseIdentifier = WordSenseId . toWNid <$> identifier
@@ -219,11 +225,11 @@ word = lexeme $ takeWhile1P Nothing (not . isSpace)
 lexicalIdentifier :: Parser LexicalId
 lexicalIdentifier = LexicalId <$> option 0 (integer <?> "Lexical Identifier")
 
-framesStatement :: Parser [Int]
+framesStatement :: Parser (NonEmpty FrameId)
 framesStatement = statement "fs" frameNumbers
 
-frameNumbers :: Parser [Int]
-frameNumbers = some (integer <?> "Frame number")
+frameNumbers :: Parser (NonEmpty FrameId)
+frameNumbers = NC.some (integer <?> "Frame number")
 
 lineText :: Parser Text
 lineText = T.stripEnd <$> takeWhileP Nothing (/= '\n')

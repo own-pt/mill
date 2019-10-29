@@ -155,13 +155,16 @@ data WordPointer = WordPointer PointerName WordSenseId
 data SynsetRelation = SynsetRelation RelationName SynsetId
   deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
 type FrameId = Int
-data WNWord = WNWord WordSenseId [FrameId] [WordPointer]
+data WSense = WSense
+  { wid      :: WordSenseId
+  , extra    :: WNExtra
+  , pointers :: [WordPointer]
+  }
   deriving (Binary,Eq,Generic,Ord,Show)
 
-senseKey :: Int -> Int -> Maybe SynsetRelation -> WNWord -> String
+senseKey :: Int -> Int -> Maybe SynsetRelation -> WSense -> String
 senseKey lexFileNum synsetTypeNum maybeHeadRelation
-  wordSense@(WNWord (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = LexicalId lexicalId}) _ _)
-  = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum
+  wordSense@(WSense (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = LexicalId lexicalId}) _ _)
                                 lexicalId headWordForm (headWordLexicalId :: String)
   where
     lemma = T.toLower wordForm
@@ -178,6 +181,16 @@ newtype SourcePosition = SourcePosition (Int, Int)
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary,ToJSON)
 
+data SyntacticMarker = Attributive | Predicative | Postnominal
+  deriving (Binary, Eq, Generic, Ord, Show)
+
+data WNExtra = WNEmpty | WNVerb (NonEmpty FrameId) | WNAdj Text
+  deriving (Binary, Eq, Generic, Ord, Show)
+
+extraFrames :: WNExtra -> [FrameId]
+extraFrames (WNVerb frames) = NE.toList frames
+extraFrames _ = []
+
 -- synsets can be
 data Unvalidated deriving (Binary,Generic)
 data Validated
@@ -186,11 +199,11 @@ data Synset a = Synset
   { comments            :: [Text]
   , sourcePosition      :: SourcePosition
   , lexicographerFileId :: LexicographerFileId
-  , wordSenses          :: NonEmpty WNWord
+  , wordSenses          :: NonEmpty WSense
   , definition          :: Text
   , examples            :: [Text]
-  , frames              :: [FrameId]
   , relations           :: [SynsetRelation] -- [] use NonEmpty if not for a relationless adjectives?
+  , extra               :: WNExtra
   } deriving (Binary,Eq,Generic,Show)
 
 instance Ord (Synset Validated) where
@@ -201,7 +214,7 @@ synsetPOS :: Synset a -> WNPOS
 synsetPOS Synset{lexicographerFileId = LexicographerFileId{pos}} = pos
 
 synsetId :: Synset a -> SynsetId
-synsetId Synset{wordSenses = WNWord wordSenseId _ _:|_}
+synsetId Synset{wordSenses = WSense wordSenseId _ _:|_}
   = coerce wordSenseId
 
 ---- validation
@@ -255,6 +268,8 @@ data WNError
   | UnsortedWordSenses (NonEmpty (NonEmpty Text))
   | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
+  | FramesNonVerb
+  | MarkerNonAdj
   deriving (Binary,Generic,Show)
 
 data SourceError
@@ -289,8 +304,8 @@ instance Pretty SynsetRelation where
   pretty (SynsetRelation relationName (SynsetId wnId))
     = prettyRelation relationName wnId
 
-instance Pretty WNWord where
-  pretty (WNWord (WordSenseId wnId) _ _)
+instance Pretty WSense where
+  pretty (WSense (WordSenseId wnId) _ _)
     = pretty wnId
 
 instance Pretty (Synset a) where
@@ -348,6 +363,8 @@ instance Pretty WNError where
     = prettyUnordered "synset word senses" sequences
   pretty (UnsortedWordPointers sequences)
     = prettyUnordered "word pointers" sequences
+  pretty FramesNonVerb = "Can't have frames in non-verb synset/wordsense"
+  pretty MarkerNonAdj  = "Can't have syntactic marker in non-adjective synset/wordsense"
 
 instance Pretty SourceError where
   pretty (SourceError lexicographerFileId (SourcePosition (beg, end)) wnError)

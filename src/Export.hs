@@ -1,11 +1,11 @@
 {-# LANGUAGE StrictData #-}
 module Export where
 
-import Data ( WNid(..)
+import Data ( WNid(..), WNExtra(..)
             , WordSenseId(..), SynsetId(..), Synset(..), Validated
-            , SynsetRelation(..), WNWord(..), WordPointer(..)
+            , SynsetRelation(..), WSense(..), WordPointer(..)
             , idLexFile, lexicographerFileIdToText, senseKey, singleton, synsetId, synsetType
-            , tshow
+            , tshow, extraFrames
             , WNPOS(..), unsafeLookup, WordSenseForm(..), LexicalId(..) )
 import Validate (DupsIndex, Index, indexKey, lookupIndex)
 ---
@@ -35,28 +35,35 @@ uncurry3 f (a,b,c) = f a b c
 -- JSON/aeson
 synsetToJSON :: Map Text Text -> Map Text Int -> Synset Validated -> Value
 synsetToJSON textToCanonicNames lexNamesToLexNum
-  Synset{comments, wordSenses = wordSenses@(WNWord headWordId@(WordSenseId wnId@WNid{pos}) _ _:|_), ..}
+  Synset{comments, wordSenses = wordSenses@(WSense headWordId@(WordSenseId wnId@WNid{pos}) _ _:|_), ..}
   = object
-  [ "id"         .= headWordId
-  , "wordsenses" .= NE.map toWordSense wordSenses
-  , "definition" .= definition
-  , "examples"   .= examples
-  , "frames"     .= frames
-  , "relations"  .= map (\(SynsetRelation name targetIdentifier) -> toRelation name targetIdentifier) relations
-  , "position"   .= sourcePosition
-  , "comments"   .= comments
-  ]
+    $ synsetFrames extra
+    ++
+    [ "id"         .= headWordId
+    , "wordsenses" .= NE.map toWordSense wordSenses
+    , "definition" .= definition
+    , "examples"   .= examples
+    , "relations"  .= map (\(SynsetRelation name targetIdentifier) -> toRelation name targetIdentifier) relations
+    , "position"   .= sourcePosition
+    , "comments"   .= comments
+    ]
   where
+    synsetFrames (WNVerb frames) = ["frames" .= NE.toList frames]
+    synsetFrames _ = []
     toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "id" .= wnIdentifier]
     missingRelation name = "No relation with name " ++ show name ++ " found in relation.tsv"
-    toWordSense wordSense@(WNWord (WordSenseId WNid{lexForm, lexId}) wordFrames pointers)
-      = object
-      [ "lexicalForm" .= lexForm
-      , "lexicalId" .= lexId
-      , "frames" .= wordFrames
-      , "pointers" .= map (\(WordPointer name targetIdentifier) -> toRelation name targetIdentifier) pointers
-      , "senseKey" .= senseKey lexFileNum (synsetType pos) maybeHeadSynset wordSense
-      ]
+    toWordSense wordSense@(WSense (WordSenseId WNid{lexForm, lexId}) wExtra pointers)
+      = object $
+        wordExtra wExtra
+        ++ [ "lexicalForm" .= lexForm
+           , "lexicalId" .= lexId
+           , "pointers" .= map (\(WordPointer name targetIdentifier) -> toRelation name targetIdentifier) pointers
+           , "senseKey" .= senseKey lexFileNum (synsetType pos) maybeHeadSynset wordSense
+           ]
+      where
+        wordExtra (WNAdj marker)  = ["syntacticMarker" .= marker]
+        wordExtra (WNVerb frames) = ["frames" .= NE.toList frames]
+        wordExtra _ = []
     lexfileName  = lexicographerFileIdToText $ idLexFile wnId
     lexFileNum = unsafeLookup ("No lexfile with name "
                                ++ show lexfileName ++ "found in lexnames.tsv")
@@ -90,7 +97,7 @@ data DBSynset = DBSynset
 
 synsetToDB :: Map Text Text -> Map Text Int -> Index (Synset a) -> Synset Validated -> DBSynset
 synsetToDB relationsMap lexicographerMap index
-  Synset{lexicographerFileId, wordSenses = wordSenses@(WNWord (WordSenseId headId@WNid{pos}) _ _:|_), definition, examples, frames, relations} =
+  Synset{lexicographerFileId, wordSenses = wordSenses@(WSense (WordSenseId headId@WNid{pos}) _ _:|_), definition, examples, extra, relations} =
   DBSynset { _id = headId
            , lexicographerFileNum = let lexname = lexicographerFileIdToText lexicographerFileId
                                     in unsafeLookup
@@ -101,20 +108,20 @@ synsetToDB relationsMap lexicographerMap index
            , wordSenses = NE.map toWord wordSenses -- FIXME: add syntactic marker
            , gloss = T.intercalate "; " (definition
                                          : map (\e -> T.cons '"' $ T.snoc e '"') examples)
-           , frames = map synsetFrame frames
+           , frames = map synsetFrame (extraFrames extra)
                     ++ concatMap toWordFrames (zip [1..] $ NE.toList wordSenses)
            , relations = map synsetRelation relations
                          ++ concatMap wordRelations (zip [1..] $ NE.toList wordSenses)
            }
   where
-    toWord (WNWord (WordSenseId WNid{lexForm = WordSenseForm form,lexId = LexicalId lexicalId}) _ _) = (form, lexicalId)
+    toWord (WSense (WordSenseId WNid{lexForm = WordSenseForm form,lexId = LexicalId lexicalId}) _ _) = (form, lexicalId)
     synsetRelation (SynsetRelation relationName
                     wnIdentifier@(SynsetId WNid{pos=wnPoS}))
       = ( unsafeLookup ("Missing relation " ++ T.unpack relationName ++ " in relations.tsv") relationName relationsMap
         , wnIdentifier, wnPoS, (0,0))
     synsetFrame = (0,)
-    toWordFrames (ix, WNWord _ wordFrames _) = map (ix,) wordFrames
-    wordRelations (ix, WNWord _ _ wordPointers) =
+    toWordFrames (ix, WSense{extra = wordExtra}) = map (ix,) $ extraFrames wordExtra
+    wordRelations (ix, WSense _ _ wordPointers) =
       map (wordRelation ix) wordPointers
     wordRelation ix (WordPointer pointerName
                        (WordSenseId wnId@WNid{pos=wnPoS})) =
@@ -131,7 +138,7 @@ synsetToDB relationsMap lexicographerMap index
       let synsetWords = getSynsetWords wnId
       in fromMaybe
            (error $ "No wordsense corresponding to word sense " ++ show wnId)
-           $ findIndex (\(WNWord (WordSenseId synsetWnId) _ _) -> synsetWnId == wnId) synsetWords
+           $ findIndex (\(WSense (WordSenseId synsetWnId) _ _) -> synsetWnId == wnId) synsetWords
 
 padText :: Int -> Text -> Text
 padText n x = T.append (T.replicate (n - T.length x) "0") x
@@ -230,7 +237,7 @@ showIndex wnPos relationsLexName offsetMap index indexIndex = foldlDescWithKey' 
         lemmaRelations = nub $ concatMap (wordRelations lemma) synsets
     wordRelations lemma Synset{relations, wordSenses} = concatMap lemmaPointers wordSenses ++ map (\(SynsetRelation name _) -> name) relations
       where
-        lemmaPointers (WNWord (WordSenseId WNid{lexForm=WordSenseForm wordForm}) _ wordPointers)
+        lemmaPointers (WSense (WordSenseId WNid{lexForm=WordSenseForm wordForm}) _ wordPointers)
           = if foldCase wordForm == lemma then map pointerName wordPointers else []
     pointerName (WordPointer name _) = name
     toLexRelationName relationName = unsafeLookup ("Missing relation " ++ T.unpack relationName ++ " in relations.tsv") relationName relationsLexName
