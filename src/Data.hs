@@ -165,7 +165,7 @@ data WSense = WSense
 senseKey :: Int -> Int -> Maybe SynsetRelation -> WSense -> String
 senseKey lexFileNum synsetTypeNum maybeHeadRelation
   wordSense@(WSense (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = LexicalId lexicalId}) _ _)
-                                lexicalId headWordForm (headWordLexicalId :: String)
+  = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum lexicalId headWordForm (headWordLexicalId :: String)
   where
     lemma = T.toLower wordForm
     (headWordForm, headWordLexicalId) =
