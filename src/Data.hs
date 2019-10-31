@@ -354,7 +354,7 @@ instance Pretty WNError where
   pretty (UnsortedExamples sequences)
     = prettyUnordered "examples" sequences
   pretty (UnsortedFrames sequences)
-    = prettyUnordered "synset IDs" sequences
+    = prettyUnordered "frame IDs" sequences
   pretty (UnsortedSynsets sequences)
     = prettyUnordered "synsets" sequences
   pretty (UnsortedSynsetRelations sequences)
