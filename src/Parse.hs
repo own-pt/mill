@@ -111,7 +111,7 @@ synset lexicographerFileId = do
   wordSenses  <- wordSenseStatement `NC.endBy1` linebreak
   definition  <- definitionStatement <* linebreak
   examples    <- exampleStatement `endBy` linebreak
-  extra       <- (fmap WNVerb framesStatement <|> emptyExtra) <* linebreak
+  extra       <- fmap WNVerb framesStatement <* linebreak <|> emptyExtra
   relations   <- synsetRelationStatement `endBy` linebreak
   endOffset   <- getOffset
   return $ Synset{ comments
