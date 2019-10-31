@@ -165,7 +165,7 @@ data WSense = WSense
 senseKey :: Int -> Int -> Maybe SynsetRelation -> WSense -> String
 senseKey lexFileNum synsetTypeNum maybeHeadRelation
   wordSense@(WSense (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = LexicalId lexicalId}) _ _)
-                                lexicalId headWordForm (headWordLexicalId :: String)
+  = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum lexicalId headWordForm (headWordLexicalId :: String)
   where
     lemma = T.toLower wordForm
     (headWordForm, headWordLexicalId) =
@@ -354,7 +354,7 @@ instance Pretty WNError where
   pretty (UnsortedExamples sequences)
     = prettyUnordered "examples" sequences
   pretty (UnsortedFrames sequences)
-    = prettyUnordered "frame IDs" sequences
+    = prettyUnordered "synset IDs" sequences
   pretty (UnsortedSynsets sequences)
     = prettyUnordered "synsets" sequences
   pretty (UnsortedSynsetRelations sequences)
