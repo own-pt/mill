@@ -2,8 +2,8 @@ module Parse (parseLexicographer) where
 
 import Data ( Synset(..), LexicographerFileId(..), WNPOS, WNObj(..), SourceValidation
             , Validation(..), Unvalidated, SynsetRelation(..), WSense(..), WordSenseId(..)
-            , WordPointer(..), LexicalId(..), WordSenseForm(..), SourceError(..)
-            , SourcePosition(..), WNError(..), SynsetId(..), WNExtra(..), FrameId
+            , WordPointer(..), IdRelation, WordSenseForm(..), SourceError(..), Relation(..)
+            , SourcePosition(..), WNError(..), WNExtra(..), FrameId, RelationName
             , readLongWNPOS, toWNid)
 
 import Control.Applicative hiding (some,many)
@@ -159,15 +159,20 @@ exampleStatement = statement "e" textBlock
 synsetRelationStatement :: Parser SynsetRelation
 synsetRelationStatement = L.nonIndented spaceConsumer go
   where
-    go = SynsetRelation
-      <$> relationNameP SynsetObj synsetRelationName
-      <*> (SynsetId . toWNid <$> identifier)
+    go = SynsetRelation <$> relationP SynsetObj synsetRelationName
     synsetRelationName = T.stripEnd
-      -- [ ] handle this better
       <$> (takeWhile1P Nothing (`notElem` [':', ' ', '\n']) <?> "Synset relation name")
+      -- [ ] handle this better
       <* symbol ":"
 
+relationP :: WNObj -> Parser RelationName -> Parser Relation
+relationP wnObj p =
+  Relation
+  <$> relationNameP wnObj p
+  <*> (toWNid <$> identifier)
+
 relationNameP :: WNObj -> Parser Text -> Parser Text
+-- [] it's better to validate outside the parser
 relationNameP obj name = do
   LexicographerFileId{pos} <- reader fst3
   relationsMap     <- reader $ \(_,second,_) -> second
@@ -202,28 +207,27 @@ wordSenseStatement = statement "w" go
 wordSenseIdentifier :: Parser WordSenseId
 wordSenseIdentifier = WordSenseId . toWNid <$> identifier
 
-identifier :: Parser (LexicographerFileId, WordSenseForm, LexicalId)
+identifier :: Parser (LexicographerFileId, WordSenseForm, IdRelation)
 identifier =
   (,,)
   <$>  (try lexicographerIdentifier <|> reader fst3)
-  <*>  fmap WordSenseForm word <*> lexicalIdentifier
+  <*>  fmap WordSenseForm word <*> optional identifyingRelation
   where
     lexicographerIdentifier = do
       wnName <- wnNameR
       lexicographerIdP wnName <* char ':'
+    identifyingRelation =
+      (,)
+      <$> (symbol "(" *> word)
+      <*> (fmap WordSenseForm word <* symbol ")")
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
   where
-    go =  WordPointer
-      <$> relationNameP WordObj (word <?> "Word pointer")
-      <*> wordSenseIdentifier
+    go =  WordPointer <$> relationP WSenseObj (word <?> "Word pointer")
 
 word :: Parser Text
 word = lexeme $ takeWhile1P Nothing (not . isSpace)
-
-lexicalIdentifier :: Parser LexicalId
-lexicalIdentifier = LexicalId <$> option 0 (integer <?> "Lexical Identifier")
 
 framesStatement :: Parser (NonEmpty FrameId)
 framesStatement = statement "fs" frameNumbers

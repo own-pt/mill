@@ -21,21 +21,21 @@ import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest, encloseSep
                                  , line, indent, align, vsep, squotes)
 import GHC.Generics (Generic)
-import Text.Printf (printf)
+
 
 singleton :: a -> NonEmpty a
 singleton x = x :| []
 
-data WNObj = SynsetObj | WordObj deriving (Binary,Eq,Enum,Generic,Ord)
+data WNObj = SynsetObj | WSenseObj deriving (Binary,Eq,Enum,Generic,Ord)
 
 instance Show WNObj where
   show SynsetObj = "synset"
-  show WordObj   = "word"
+  show WSenseObj = "wordsense"
 
 readWNObj :: Text -> WNObj
 readWNObj input = case input of
   "synset" -> SynsetObj
-  "word"   -> WordObj
+  "word"   -> WSenseObj
   _        -> error . T.unpack
     $ T.intercalate " " ["Can't parse", input, "as WordNet object name (one of synset or word)"]
 
@@ -96,37 +96,35 @@ newtype WordSenseForm = WordSenseForm Text
   deriving (Eq,Ord,Generic,Show)
   deriving newtype (Binary,Pretty,ToJSON)
 
-newtype LexicalId = LexicalId Int
-  deriving (Eq,Generic,Ord,Show)
-  deriving newtype (Binary,Pretty,ToJSON)
-
 tshow :: Show a => a -> Text
 tshow = T.pack . show
+
+type IdRelation = Maybe (RelationName, WordSenseForm)
 
 data WNid =
   WNid { pos     :: WNPOS
        , lexname :: Text
        , wnName  :: Text
        , lexForm :: WordSenseForm
-       , lexId   :: LexicalId
+       , idRel   :: IdRelation
        }
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary)
 
 instance Pretty WNid where
-  pretty WNid{pos, lexname, wnName, lexForm, lexId}
+  pretty WNid{pos, lexname, wnName, lexForm, idRel}
     =   pretty LexicographerFileId{pos, lexname, wnName}
     <>  colon
     <>  pretty lexForm
-    <+> pretty lexId
+    <+> pretty idRel
 
 instance ToJSON WNid where
-  toJSON WNid{pos,lexname,wnName,lexForm,lexId}
-    = toJSON (wnName, pos, lexname, lexForm, lexId)
+  toJSON WNid{pos,lexname,wnName,lexForm,idRel}
+    = toJSON (wnName, pos, lexname, lexForm, idRel)
 
 
-toWNid :: (LexicographerFileId, WordSenseForm, LexicalId) -> WNid
-toWNid (LexicographerFileId{pos,wnName,lexname}, lexForm, lexId) = WNid{pos,wnName,lexname,lexForm,lexId}
+toWNid :: (LexicographerFileId, WordSenseForm, IdRelation) -> WNid
+toWNid (LexicographerFileId{pos,wnName,lexname}, lexForm, idRel) = WNid{pos,wnName,lexname,lexForm,idRel}
 
 idLexFile :: WNid -> LexicographerFileId
 idLexFile WNid{..} = LexicographerFileId{..}
@@ -137,10 +135,10 @@ newtype WordSenseId =
   deriving anyclass (Binary,ToJSON)
   deriving newtype (Pretty)
 
-makeWordSenseId :: LexicographerFileId -> WordSenseForm -> LexicalId
+makeWordSenseId :: LexicographerFileId -> WordSenseForm -> IdRelation
   -> WordSenseId
-makeWordSenseId LexicographerFileId{pos,lexname,wnName} lexForm lexId =
-  WordSenseId WNid{pos,lexname,wnName,lexForm,lexId}
+makeWordSenseId LexicographerFileId{pos,lexname,wnName} lexForm idRel =
+  WordSenseId WNid{pos,lexname,wnName,lexForm,idRel}
 
 newtype SynsetId =
   SynsetId WNid
@@ -148,12 +146,18 @@ newtype SynsetId =
   deriving anyclass (Binary,ToJSON)
   deriving newtype (Pretty)
 
-type PointerName = Text
 type RelationName = Text
-data WordPointer = WordPointer PointerName WordSenseId
+data Relation = Relation RelationName WNid
   deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
-data SynsetRelation = SynsetRelation RelationName SynsetId
-  deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
+newtype WordPointer = WordPointer Relation
+  deriving (Eq,Generic,Ord,Show)
+  deriving anyclass (Binary,ToJSON)
+  deriving newtype (Pretty)
+newtype SynsetRelation = SynsetRelation Relation
+  deriving (Eq,Generic,Ord,Show)
+  deriving anyclass (Binary,ToJSON)
+  deriving newtype (Pretty)
+
 type FrameId = Int
 data WSense = WSense
   { wid      :: WordSenseId
@@ -162,19 +166,19 @@ data WSense = WSense
   }
   deriving (Binary,Eq,Generic,Ord,Show)
 
-senseKey :: Int -> Int -> Maybe SynsetRelation -> WSense -> String
-senseKey lexFileNum synsetTypeNum maybeHeadRelation
-  wordSense@(WSense (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = LexicalId lexicalId}) _ _)
-  = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum lexicalId headWordForm (headWordLexicalId :: String)
-  where
-    lemma = T.toLower wordForm
-    (headWordForm, headWordLexicalId) =
-      case (synsetTypeNum, maybeHeadRelation) of
-        (5, Just (SynsetRelation _
-                  (SynsetId WNid{lexForm = WordSenseForm headForm,lexId = LexicalId headLexicalId})))
-          -> (T.toLower headForm, printf "%02d" headLexicalId)
-        (5,Nothing) -> error $ "No head synset found for " ++ show wordSense
-        _           -> ("", "")
+-- senseKey :: Int -> Int -> Maybe SynsetRelation -> WSense -> String
+-- senseKey lexFileNum synsetTypeNum maybeHeadRelation
+--   wordSense@(WSense (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = IdRelation lexicalId}) _ _)
+--   = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum lexicalId headWordForm (headWordIdRelation :: String)
+--   where
+--     lemma = T.toLower wordForm
+--     (headWordForm, headWordIdRelation) =
+--       case (synsetTypeNum, maybeHeadRelation) of
+--         (5, Just (SynsetRelation _
+--                   (SynsetId WNid{lexForm = WordSenseForm headForm,lexId = IdRelation headIdRelation})))
+--           -> (T.toLower headForm, printf "%02d" headIdRelation)
+--         (5,Nothing) -> error $ "No head synset found for " ++ show wordSense
+--         _           -> ("", "")
 
 
 newtype SourcePosition = SourcePosition (Int, Int)
@@ -252,20 +256,23 @@ validation :: (e -> b) -> (a -> b) -> Validation e a -> b
 validation f _ (Failure e) = f e
 validation _ g (Success a) = g a
 
+-- [] can refactor a lot of code involving relations by having
+-- wordpointer and synsetrelation be newtypes of the same thing, and
+-- using WNObj to distinguish between them when needed
 data WNError
-  = ParseError String
+  = ParseError String -- [] do we still use all of these?
   | DuplicateWordSense String
   | DuplicateExamples (NonEmpty Text)
   | DuplicateFrames (NonEmpty FrameId)
-  | DuplicateSynsetWords (NonEmpty Text)
+  | DuplicateSynsetWords (NonEmpty WordSenseForm)
   | DuplicateWordRelation (NonEmpty WordPointer)
   | DuplicateSynsetRelation (NonEmpty SynsetRelation)
-  | MissingSynsetRelationTarget SynsetRelation
-  | MissingWordRelationTarget WordPointer
+  | MissingRelationTarget WNObj Relation
+  | AmbiguousRelationTarget WNObj Relation (NonEmpty (Synset Unvalidated))
   | UnsortedExamples (NonEmpty (NonEmpty Text))
   | UnsortedFrames (NonEmpty (NonEmpty FrameId))
   | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
-  | UnsortedWordSenses (NonEmpty (NonEmpty Text))
+  | UnsortedWordSenses (NonEmpty (NonEmpty WordSenseForm))
   | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
   | FramesNonVerb
@@ -286,6 +293,10 @@ type WNValidation a = Validation (NonEmpty WNError) a
 type SourceValidation a = Validation (NonEmpty SourceError) a
 
 --- Pretty instances
+instance Pretty WNObj where
+  pretty SynsetObj = "synset"
+  pretty WSenseObj = "wordsense"
+
 instance Pretty WNPOS where
   pretty = pretty . showLongWNPOS
 
@@ -293,16 +304,9 @@ instance Pretty LexicographerFileId where
   pretty LexicographerFileId{pos, lexname, wnName} =
     "@" <> pretty wnName <> ":" <> pretty pos <> dot <> pretty lexname
 
-prettyRelation :: Text -> WNid -> Doc ann
-prettyRelation name wnId = pretty name <> "»" <> pretty wnId
-
-instance Pretty WordPointer where
-  pretty (WordPointer pointerName (WordSenseId wnId))
-    = prettyRelation pointerName wnId
-
-instance Pretty SynsetRelation where
-  pretty (SynsetRelation relationName (SynsetId wnId))
-    = prettyRelation relationName wnId
+instance Pretty Relation where
+  pretty (Relation relationName wnId)
+    = pretty relationName <> "»" <> pretty wnId
 
 instance Pretty WSense where
   pretty (WSense (WordSenseId wnId) _ _)
@@ -310,13 +314,6 @@ instance Pretty WSense where
 
 instance Pretty (Synset a) where
   pretty Synset{wordSenses = wordSense:|_} = pretty wordSense
-
-prettyMissingTarget :: Text -> Text -> Doc ann -> Doc ann
-prettyMissingTarget relationType relationName target
-  =   "error: Missing"
-  <+> pretty relationType
-  <+> pretty relationName
-  <+> "target" <+> target
 
 prettyUnordered :: Pretty a => Text -> NonEmpty (NonEmpty a) -> Doc ann
 prettyUnordered what sequences
@@ -347,10 +344,13 @@ instance Pretty WNError where
     = prettyDuplicate "word pointer" wordPointers
   pretty (DuplicateSynsetRelation synsetRelations)
     = prettyDuplicate "synset relation" synsetRelations
-  pretty (MissingSynsetRelationTarget (SynsetRelation relationName target))
-    = prettyMissingTarget "synset relation" relationName $ pretty target
-  pretty (MissingWordRelationTarget (WordPointer pointerName target))
-    = prettyMissingTarget "word pointer" pointerName $ pretty target
+  pretty (MissingRelationTarget wnObj (Relation relationName target))
+    =   "error: Missing "
+    <+> pretty relationName
+    <+> pretty wnObj
+    <+> "relation target" <+> pretty target
+  pretty (AmbiguousRelationTarget _ (Relation relationName target) _)
+    = pretty relationName <+> pretty target -- []
   pretty (UnsortedExamples sequences)
     = prettyUnordered "examples" sequences
   pretty (UnsortedFrames sequences)

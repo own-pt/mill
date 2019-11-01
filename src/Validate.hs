@@ -1,8 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Validate
   ( validateSynsets
-  , checkIndexNoDuplicates
-  , DupsIndex
+  , ValIndex
   , indexSynsets
   , lookupIndex
   , makeIndex
@@ -13,61 +12,76 @@ module Validate
   ) where
 
 import Data (Synset(..), Unvalidated, Validated, SourceValidation
-            , WSense(..), WNid(..),SynsetId(..), Validation(..), WordSenseForm(..), LexicalId(..)
-            , SynsetRelation(..),WordPointer(..), WNValidation, WNError(..), WNPOS(..), LexicographerFileId(..)
-            , WordSenseId(..),SourceError(..), WNExtra(..), singleton,toSourceError,lexicographerFileIdToText)
+            , WSense(..), WNid(..), Validation(..), WordSenseForm(..)
+            , SynsetRelation(..),WordPointer(..), WNValidation, WNError(..), WNPOS(..)
+            , LexicographerFileId(..), Relation(..), WNObj(..)
+            , WordSenseId(..),SourceError(..), WNExtra(..), singleton,lexicographerFileIdToText)
 
 import Data.Bifunctor (bimap)
 import Data.Coerce (coerce)
-import Data.Either (either,rights)
 import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
-import Data.ListTrie.Patricia.Map (TrieMap,fromListWith',member
-                                  ,toAscList,map',mapAccumWithKey',lookup)
+import Data.ListTrie.Patricia.Map (TrieMap,fromListWith'
+                                  ,toAscList,map',lookup)
 import Prelude hiding (lookup)
+
+--- idea: wordsenses are identified by their lexfile, lexical form,
+--- and (if necessary) an unambiguous relation + lexform. we start
+--- with a validation index which maps (lexfile, lexical form) to
+--- synsets; we then check that all references are unique; while doing
+--- so we add a temporary meaningless id to each reference (lexfile,
+--- sourcePosition) which allows us to build the final index, which is
+--- used by the rest of the application
+
+--- having two indices will not work because it would hinder
+--- incremental validation (only validating one file against several)
+
+--- although we don't really need two indices (only for wndb export,
+--- or for finding all references to an id [not implemented yet])
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
-type Index a = TrieMap WrappedIntMap Char (Either String a)
-type DupsIndex a = TrieMap WrappedIntMap Char (NonEmpty (Either String a))
+type Index a     = TrieMap WrappedIntMap Char (Either String a)
+type ValIndex a = TrieMap WrappedIntMap Char (NonEmpty a)
 
-makeIndex :: NonEmpty (Synset Unvalidated) -> DupsIndex (Synset Unvalidated)
+makeIndex :: NonEmpty (Synset Unvalidated) -> ValIndex (Synset Unvalidated)
 makeIndex synsets = fromListWith' (<>) keyValuePairs
   where
     keyValuePairs = concatMap synsetPairs synsets
-    synsetPairs synset@Synset{wordSenses = (headWordSense:|wordSenses)} =
-      let headSenseKey = wordSenseKey headWordSense
-      in
-        (headSenseKey, singleton $ Right synset)
-        : map ((, singleton $ Left headSenseKey) . wordSenseKey)
-              wordSenses
+    synsetPairs synset@Synset{wordSenses} =
+      NE.toList $
+      NE.map ((, singleton synset) . wordSenseKey)
+      wordSenses
 
-checkIndexNoDuplicates :: DupsIndex (Synset Unvalidated)
-  -> SourceValidation (Index (Synset Unvalidated))
-checkIndexNoDuplicates index =
-  case mapAccumWithKey' go [] index of
-    ([], indexNoDuplicates) -> Success indexNoDuplicates
-    (x:duplicateErrors, _)  -> Failure $ x:|duplicateErrors
-  where
-    go duplicateErrors _ (value :| [])
-      = (duplicateErrors, value)
-    go duplicateErrors key values
-      = ( moreDuplicateErrors ++ duplicateErrors
-        , NE.head values )
-      where
-        lookupKey headKey = case lookup headKey index of
-          Just values' ->
-            head . filter (elem key . NE.map wordSenseKey . wordSenses) . rights
-            $ NE.toList values'
-          Nothing -> error $ "Missing synset to key " ++ key
-        moreDuplicateErrors
-          = map (\value -> toSourceError (either lookupKey id value)
-                . DuplicateWordSense $ takeWhile (/= '\t') key)
-            $ NE.toList values
+--- the whole concept of duplicates has changed, now it's basically
+--- two indistinguishable synsets; so this is uneeded in its present
+--- form
+-- checkIndexNoDuplicates :: ValIndex (Synset Unvalidated)
+--   -> SourceValidation (Index (Synset Unvalidated))
+-- checkIndexNoDuplicates index =
+--   case mapAccumWithKey' go [] index of
+--     ([], indexNoDuplicates) -> Success indexNoDuplicates
+--     (x:duplicateErrors, _)  -> Failure $ x:|duplicateErrors
+--   where
+--     go duplicateErrors _ (value :| [])
+--       = (duplicateErrors, value)
+--     go duplicateErrors key values
+--       = ( moreDuplicateErrors ++ duplicateErrors
+--         , NE.head values )
+--       where
+--         lookupKey headKey = case lookup headKey index of
+--           Just values' ->
+--             head . filter (elem key . NE.map wordSenseKey . wordSenses) . rights
+--             $ NE.toList values'
+--           Nothing -> error $ "Missing synset to key " ++ key
+--         moreDuplicateErrors
+--           = map (\value -> toSourceError (either lookupKey id value)
+--                 . DuplicateWordSense $ takeWhile (/= '\t') key)
+--             $ NE.toList values
 
 wordSenseKey :: WSense -> String
 wordSenseKey (WSense wnWordId _ _)
@@ -75,21 +89,17 @@ wordSenseKey (WSense wnWordId _ _)
 
 indexKey :: WNid -> String
 -- this is NOT the sensekey
-indexKey WNid{wnName, pos, lexname, lexForm = WordSenseForm wordForm, lexId = LexicalId lexicalId} =
+indexKey WNid{wnName, pos, lexname, lexForm = WordSenseForm wordForm} =
   -- if changing this definition change WNDB export too
   intercalate "\t" [ T.unpack wnName
-                   , T.unpack wordForm
                    , show pos ++ T.unpack lexname
-                   , pad $ show lexicalId
+                   , T.unpack wordForm
                    ]
-  where
-    pad x = replicate (2 - length x) '0' ++ x
-
 
 
 ---
 -- checks
-checkSynset :: Index a -> Synset Unvalidated -> SourceValidation (Synset Validated)
+checkSynset :: ValIndex (Synset Unvalidated) -> Synset Unvalidated -> SourceValidation (Synset Validated)
 checkSynset index Synset{comments, lexicographerFileId, wordSenses, relations
                         , definition, examples, extra, sourcePosition} =
   case result of
@@ -114,7 +124,7 @@ checkSynset index Synset{comments, lexicographerFileId, wordSenses, relations
 --- use <*> for validation, or <*? see
 --- https://www.reddit.com/r/haskell/comments/7hqodd/pure_functional_validation/
 
-checkSynsetRelations :: Index a -> [SynsetRelation]
+checkSynsetRelations :: ValIndex (Synset Unvalidated) -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
 checkSynsetRelations index synsetRelations
   =  checkSynsetRelationsOrderNoDuplicates
@@ -124,16 +134,14 @@ checkSynsetRelations index synsetRelations
     checkSynsetRelationsOrderNoDuplicates
       = checkSortNoDuplicates UnsortedSynsetRelations DuplicateSynsetRelation synsetRelations
 
-checkSynsetRelationsTargets :: Index a -> [SynsetRelation]
+checkSynsetRelationsTargets :: ValIndex (Synset Unvalidated) -> [SynsetRelation]
   -> WNValidation [SynsetRelation]
-checkSynsetRelationsTargets index = traverse checkSynsetRelation
-  where
-    checkSynsetRelation synsetRelation@(SynsetRelation _ synsetId) =
-      if member targetSenseKey index
-      then Success synsetRelation
-      else Failure (MissingSynsetRelationTarget synsetRelation :| [])
-      where
-        targetSenseKey = indexKey $ coerce synsetId
+-- we check that the relation target exists, and more importantly that
+-- it is unique
+checkSynsetRelationsTargets index relations
+  = coerce
+  . checkRelationsTargets index SynsetObj
+  $ coerce relations
 
 validateSorted :: Ord a => [a] -> Validation (NonEmpty (NonEmpty a)) [a]
 -- maybe just sort input instead of picking some of the errors?
@@ -167,7 +175,7 @@ checkSortNoDuplicates toSortError toDuplicateError = sortedCheckNoDuplicates . v
     sortedCheckNoDuplicates (Success xs)
       = bimap (singleton . toDuplicateError) id $ validateNoDuplicates xs
 
-checkWordSenses :: Index a -> NonEmpty WSense -> WNValidation (NonEmpty WSense)
+checkWordSenses :: ValIndex (Synset Unvalidated) -> NonEmpty WSense -> WNValidation (NonEmpty WSense)
 checkWordSenses index wordSenses
   =  checkWordSensesOrderNoDuplicates
   *> traverse (checkWordSense index) wordSenses
@@ -175,9 +183,9 @@ checkWordSenses index wordSenses
   where
     checkWordSensesOrderNoDuplicates
       = checkSortNoDuplicates UnsortedWordSenses DuplicateSynsetWords . map wordSenseLexicalForm $ NE.toList wordSenses
-    wordSenseLexicalForm (WSense (WordSenseId WNid{lexForm = WordSenseForm lexicalForm}) _ _) = lexicalForm
+    wordSenseLexicalForm (WSense (WordSenseId WNid{lexForm}) _ _) = lexForm
 
-checkWordSense :: Index a -> WSense -> WNValidation WSense
+checkWordSense :: ValIndex (Synset Unvalidated) -> WSense -> WNValidation WSense
 checkWordSense index wordSense@(WSense wID extra wordPointers)
   =  checkWordSensePointersOrderNoDuplicates
   *> checkWordSensePointersTargets index wordPointers
@@ -189,16 +197,43 @@ checkWordSense index wordSense@(WSense wID extra wordPointers)
       checkSortNoDuplicates UnsortedWordPointers DuplicateWordRelation wordPointers
     
 
-checkWordSensePointersTargets :: Index a -> [WordPointer]
+checkWordSensePointersTargets :: ValIndex (Synset Unvalidated) -> [WordPointer]
   -> WNValidation [WordPointer]
-checkWordSensePointersTargets index = traverse checkWordPointer
+checkWordSensePointersTargets index relations
+  = coerce
+  . checkRelationsTargets index WSenseObj
+  $ coerce relations
+
+checkRelationsTargets :: ValIndex (Synset Unvalidated) -> WNObj -> [Relation]
+  -> WNValidation [Relation]
+checkRelationsTargets index wnObj = traverse checkRelation
   where
-    checkWordPointer wordPointer@(WordPointer _ wnWordId) =
-      if member targetSenseKey index
-      then Success wordPointer
-      else Failure (MissingWordRelationTarget wordPointer :| []) -- []
+    checkRelation relation@(Relation _ wnid@WNid{idRel}) =
+      checkCandidates maybeCandidates idRel
       where
-        targetSenseKey = indexKey $ coerce wnWordId
+        targetSenseKey = indexKey wnid
+        maybeCandidates = maybe [] NE.toList $ lookup targetSenseKey index
+        ambiguityError = Failure . singleton . AmbiguousRelationTarget wnObj relation 
+        missingRelationError = Failure . singleton $ MissingRelationTarget wnObj relation
+        checkCandidates []  _ = missingRelationError
+        checkCandidates [_] _ = Success relation
+        checkCandidates (x:candidates) Nothing = ambiguityError (x:|candidates)
+        checkCandidates candidates (Just (relName, targetLexForm))
+          = case filter isTarget candidates of
+              [] -> missingRelationError
+              [_] -> Success relation
+              x:xs -> ambiguityError $ x:|xs
+          where
+            isTarget Synset{relations, wordSenses}
+              = any relationIsTarget relations
+              || (any pointerIsTarget . concatMap pointers $ NE.filter targetWord wordSenses)
+              where
+                relationIsTarget (SynsetRelation (Relation name WNid{lexForm}))
+                  = name == relName && lexForm == targetLexForm
+                pointerIsTarget (WordPointer (Relation name WNid{lexForm}))
+                  = name == relName && lexForm == targetLexForm
+                targetWord (WSense (WordSenseId WNid{lexForm}) _ _) = lexForm == targetLexForm
+        
 
 checkExtra :: WNPOS -> WNExtra -> WNValidation WNExtra
 checkExtra _ WNEmpty = Success WNEmpty
@@ -210,7 +245,7 @@ checkExtra V (WNVerb frames) = fmap WNVerb checkedFrames
 checkExtra _ (WNAdj _) = Failure $ singleton MarkerNonAdj
 checkExtra _ (WNVerb _) = Failure $ singleton FramesNonVerb
 
-validateSynsets :: Index (Synset Unvalidated)
+validateSynsets :: ValIndex (Synset Unvalidated)
   -> NonEmpty (Synset Unvalidated)
   -> SourceValidation (NonEmpty (Synset Validated))
 -- | validates synsets from the same lexicographer file against index
@@ -239,11 +274,11 @@ oneLangIndex (Just lang)
     go (Right s@Synset{wordSenses,relations})
       = Right s{relations = filter oneLang relations, wordSenses = NE.map oneLangWordSense wordSenses}
       where
-        oneLang (SynsetRelation _ (SynsetId WNid{wnName})) = wnName == lang
+        oneLang (SynsetRelation (Relation _ WNid{wnName})) = wnName == lang
         oneLangWordSense (WSense wID fs pointers)
           = WSense wID fs
           $ filter oneLangPointer pointers
-        oneLangPointer (WordPointer _ (WordSenseId WNid{wnName})) = wnName == lang
+        oneLangPointer (WordPointer (Relation _ WNid{wnName})) = wnName == lang
 
 ---
 
