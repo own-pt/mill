@@ -200,26 +200,45 @@ def pick_synset_id(graph, lexicographer_file, synset):
                               synset, clashes)
 
 def pick_word_sense_id(graph, lexicographer_file, word_sense, synset=None, clashes=None):
-    def is_clash(relation, target):
+    def is_clash(relation, target, objtype):
         clashed = False
-        for other_synset in clashes:
-            for other_target in graph.objects(other_synset, relation):
-                if target == other_target:
-                    clashed = True
+        if objtype == "synset":
+            for other_synset in clashes:
+                for other_target in graph.objects(other_synset, relation):
+                    if target == other_target:
+                        clashed = True
+                        break
+        elif objtype == "wordsense":
+            for other_synset in clashes:
+                for other_word_sense in graph.objects(other_synset, WN_CONTAINS_WORDSENSE):
+                    for other_target in graph.objects(other_word_sense, relation):
+                        if target == other_target:
+                            clashed = True
+                            break
+        else:
+            raise Exception("objtype must be 'synset' or 'wordsense'")
         return clashed
     def find_any_relation():
         global INDISTINGUISHABLES
         id_relation = None
         for relation, obj in graph.predicate_objects(synset):
             if graph.value(obj, WN_CONTAINS_WORDSENSE): # obj is synset too
-                if not is_clash(relation, obj):
+                if not is_clash(relation, obj, "synset"):
                     id_relation = (relation, obj)
                     break
         if id_relation and None not in id_relation:
             return id_relation
         else:
-            INDISTINGUISHABLES = INDISTINGUISHABLES + 1
-            #print("no identifying relation found for {}".format(word_sense))
+            for relation, obj in graph.predicate_objects(word_sense):
+                if graph.value(predicate=WN_CONTAINS_WORDSENSE, object=obj): # obj is wordsense too
+                    if not is_clash(relation, obj, "wordsense"):
+                        id_relation = (relation, obj)
+                        break
+            if id_relation and None not in id_relation:
+                return id_relation
+            else:
+                INDISTINGUISHABLES = INDISTINGUISHABLES + 1
+                print("no identifying relation found for {}".format(word_sense))
     def find_id_relation():
         id_relation = None
         if clashes:
@@ -227,7 +246,7 @@ def pick_word_sense_id(graph, lexicographer_file, word_sense, synset=None, clash
             preferential_relations = PREFERENTIAL_RELATION_MAP[str(synset_type)]
             for relation in preferential_relations:
                 target = graph.value(synset, relation)
-                if not is_clash(relation, target):
+                if not is_clash(relation, target, "synset"):
                     id_relation = (relation, target)
                     break
             if id_relation and None not in id_relation:
