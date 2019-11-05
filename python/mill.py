@@ -170,6 +170,9 @@ def print_lexfile(graph, lexicographer_file, output_dir):
             for synset in sort_synsets(graph, lang_synsets):
                 print_synset(graph, synset, lexicographer_file, write)
 
+
+###
+## new id scheme
 def get_clashes(graph, lexicographer_file, synset, word_sense):
     # returns synsets in same lexicographer file with a word sense
     # with the same lexical form
@@ -184,31 +187,16 @@ def get_clashes(graph, lexicographer_file, synset, word_sense):
                 clashes.append(other_synset)
     return clashes
 
-def pick_synset_id(graph, lexicographer_file, synset):
-    n_clashes = -1
-    picked_word_sense = None
-    for word_sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
-        clashes = get_clashes(graph, lexicographer_file, synset, word_sense)
-        if clashes:
-            this_n_clashes = len(clashes)
-            if not picked_word_sense or this_n_clashes < n_clashes:
-                n_clashes = this_n_clashes
-                picked_word_sense = word_sense
-        else:
-            picked_word_sense = word_sense
-            break
-    assert picked_word_sense, synset
-    return pick_word_sense_id(graph, lexicographer_file, picked_word_sense,
-                              synset, clashes)
+WN_ID_RELATION = WN30['idRelation']
+WN_ID_TARGET = WN30['idTarget']
+WN_ID_WORDSENSE = WN30['idWordSense']
 
-def pick_word_sense_id(graph, lexicographer_file, word_sense, synset=None, clashes=None):
+def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
     def is_clash(relation, target, objtype):
         clashed = False
         if objtype == "synset":
             for other_synset in clashes:
                 for other_target in graph.objects(other_synset, relation):
-                    # [] comparison should be: is it in the same
-                    # lexfile and with the same lexical form?
                     if target == other_target:
                         clashed = True
                         break
@@ -222,32 +210,31 @@ def pick_word_sense_id(graph, lexicographer_file, word_sense, synset=None, clash
         else:
             raise Exception("objtype must be 'synset' or 'wordsense'")
         return clashed
+    #
     def find_any_relation():
         global INDISTINGUISHABLES
         id_relation = None
         for relation, obj in graph.predicate_objects(synset):
             if graph.value(obj, WN_CONTAINS_WORDSENSE): # obj is synset too
                 if not is_clash(relation, obj, "synset"):
-                    target_ws = graph.value(obj, WN_CONTAINS_WORDSENSE)
-                    target_lexform = graph.value(target_ws, WN_LEXICAL_FORM)
-                    assert target_lexform, obj
-                    id_relation = (relation, target_lexform)
+                    id_relation = (relation, obj)
                     break
         if id_relation and None not in id_relation:
             return id_relation
         else:
             for relation, obj in graph.predicate_objects(word_sense):
-                if graph.value(predicate=WN_CONTAINS_WORDSENSE, object=obj): # obj is wordsense too
+                if graph.value(predicate=WN_CONTAINS_WORDSENSE, object=obj):
+                    # obj is wordsense too
                     if not is_clash(relation, obj, "wordsense"):
-                        target_lexform = graph.value(obj, WN_LEXICAL_FORM)
-                        assert target_lexform, obj
-                        id_relation = (relation, target_lexform)
+                        id_relation = (relation, obj)
                         break
             if id_relation and None not in id_relation:
                 return id_relation
             else:
-                INDISTINGUISHABLES = INDISTINGUISHABLES + 1
+                # [] return something here
+                INDISTINGUISHABLES += 1
                 #print("no identifying relation found for {}".format(word_sense))
+    #
     def find_id_relation():
         id_relation = None
         if clashes:
@@ -256,10 +243,7 @@ def pick_word_sense_id(graph, lexicographer_file, word_sense, synset=None, clash
             for relation in preferential_relations:
                 target = graph.value(synset, relation)
                 if target and not is_clash(relation, target, "synset"):
-                    target_ws = graph.value(target, WN_CONTAINS_WORDSENSE)
-                    target_lexform = graph.value(target_ws, WN_LEXICAL_FORM)
-                    assert target_lexform, target
-                    id_relation = (relation, target_lexform)
+                    id_relation = (relation, target)
                     break
             if id_relation and None not in id_relation:
                 return id_relation
@@ -268,14 +252,58 @@ def pick_word_sense_id(graph, lexicographer_file, word_sense, synset=None, clash
         else:
             return None
     #
+    clashes = get_clashes(graph, lexicographer_file, synset, word_sense)
+    return find_id_relation()
+
+def pick_synset_ids(graph, lexicographer_file, synset):
+    wordsense_as_id = None
+    for word_sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
+        word_sense_id = pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset)
+        if word_sense_id:
+            (id_relation, id_target) = word_sense_id
+            graph.set((word_sense, WN_ID_RELATION, id_relation))
+            graph.set((word_sense, WN_ID_TARGET, id_target))
+        else:
+            wordsense_as_id = word_sense
+    if not wordsense_as_id:
+        wordsense_as_id = graph.value(synset, WN_CONTAINS_WORDSENSE)
+    graph.set((synset, WN_ID_WORDSENSE, wordsense_as_id))
+    return None
+
+def pick_wn_ids(graph):
+    lex_files = set(graph.objects(predicate=WN_LEXICOGRAPHER_FILE))
+    for lex_file in lex_files:
+        for synset in graph.subjects(WN_LEXICOGRAPHER_FILE, lex_file):
+            pick_synset_ids(graph, lex_file, synset)
+    
+###
+
+def word_sense_id(graph, lexicographer_file, word_sense, synset=None):
+    def get_id_relation():
+        id_relation = graph.value(word_sense, WN_ID_RELATION)
+        id_target = graph.value(word_sense, WN_ID_TARGET)
+        if id_relation and id_target:
+            _, name = r.namespace.split_uri(id_relation)
+            id_relation_txt_name = SYNSET_RELATIONS.get(name, False) or WORD_RELATIONS.get(name)
+            target_id_wordsense = graph.value(id_target, WN_ID_WORDSENSE)
+            if target_id_wordsense:
+                id_target = target_id_wordsense
+            target_lexical_form = graph.value(id_target, WN_LEXICAL_FORM)
+            return (id_relation_txt_name, target_lexical_form)
+        elif id_relation or id_target:
+            assert False
+        else:
+            return None
     synset = synset or graph.value(predicate=WN_CONTAINS_WORDSENSE, object=word_sense)
-    clashes = clashes or get_clashes(graph, lexicographer_file, synset, word_sense)
-    id_relation = find_id_relation()
     lexical_form = graph.value(word_sense, WN_LEXICAL_FORM)
     in_lang = graph.value(synset, WN_LANG)
     assert in_lang, word_sense
     assert lexical_form, word_sense
-    return (in_lang, lexicographer_file, lexical_form, id_relation)
+    return (in_lang, lexicographer_file, lexical_form, get_id_relation())
+
+def synset_id(graph, lexicographer_file, synset):
+    word_sense = graph.value(synset, WN_ID_WORDSENSE)
+    return word_sense_id(graph, lexicographer_file, word_sense, synset)
 
 def print_word_sense_id(wordsense_id, lexicographer_file=None):
     (in_lang, in_lexfile, lexical_form, id_relation) = wordsense_id
@@ -283,12 +311,8 @@ def print_word_sense_id(wordsense_id, lexicographer_file=None):
     prefix = "{}".format(lexfile_str) if in_lang == CURRENT_LANG else "@{}:{}:".format(in_lang, in_lexfile)
     id_relation_txt = ""
     if id_relation:
-        (predicate, target) = id_relation
-        _, name = r.namespace.split_uri(predicate)
-        id_relation_txt_name = SYNSET_RELATIONS.get(name, False) or WORD_RELATIONS.get(name)
-        id_relation_txt = " ({} {})".format(id_relation_txt_name, target)
-        assert id_relation_txt_name, name
-        assert target, wordsense_id
+        (predicate, target_lexical_form) = id_relation
+        id_relation_txt = " ({} {})".format(predicate, target_lexical_form)
     return "{}{}{}".format(prefix, lexical_form, id_relation_txt)
 
 
@@ -307,11 +331,11 @@ def print_synset(graph, synset, lexicographer_file, write):
                 if obj_is_synset:
                     target_lexfile = graph.value(obj, WN_LEXICOGRAPHER_FILE)
                     rels.append((predicate_txt_name,
-                                 pick_synset_id(graph, target_lexfile, obj)))
+                                 synset_id(graph, target_lexfile, obj)))
             else:
                 if obj_is_synset:
                     raise LookupError("{} relation not found".format(predicate_name))
-        rels.sort(key=lambda k: (k[0], k[1][0], k[1][1], k[1][2], k[1][3] if k[1][3] else ("", "")))
+        rels.sort(key=relation_sort_key)
         for (relation_name, target) in rels:
             write(print_relation(relation_name, target))
     #
@@ -340,6 +364,12 @@ def print_synset(graph, synset, lexicographer_file, write):
     print_relations()
     write("")
 
+def relation_sort_key(wordsense_id):
+    (relname, (wn_name, lexicographer_file, lexical_form, maybe_id_relation)) = wordsense_id
+    id_relation = maybe_id_relation or ("", "")
+    res = (relname, wn_name, lexicographer_file, lexical_form, id_relation)
+    return res
+
 
 def print_word_sense(graph, word_sense, lexicographer_file, write):
     def print_word_relations():
@@ -362,7 +392,7 @@ def print_word_sense(graph, word_sense, lexicographer_file, write):
                     # obj is wordsense too
                     target_lexfile = graph.value(synset, WN_LEXICOGRAPHER_FILE)
                     relations.append((predicate_txt_name,
-                                      pick_word_sense_id(graph, target_lexfile, obj)))
+                                      word_sense_id(graph, target_lexfile, obj)))
                 else:
                     raise LookupError("relation {} target {} not wordsense".format(predicate_name, obj))
         if frames:
@@ -373,7 +403,7 @@ def print_word_sense(graph, word_sense, lexicographer_file, write):
             [marker] = markers  # check that there is only one marker
             write(" {} {}".format(
                 WORD_RELATIONS[SYNTACTIC_MARKER], marker), end="")
-        relations.sort(key=lambda k: (k[0], k[1][0:2], k[1][3] if k[1][3] else ("","")))
+        relations.sort(key=relation_sort_key)
         for relation_name, target in relations:
             write(print_word_relation(relation_name, target), end="")
         write("")
