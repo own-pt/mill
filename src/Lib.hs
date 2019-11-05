@@ -4,33 +4,38 @@ module Lib
     , parseLexicographerFile
     , parseLexicographerFiles
     , build
-    , validateLexicographerFile
-    , validateLexicographerFiles
-    , lexicographerFilesJSON
+   , validateLexicographerFile
+   , validateLexicographerFiles
+   , lexicographerFilesJSON
     , readConfig
-    , toWNDB
+--    , toWNDB
     ) where
 
-import Data ( Synset(..), Unvalidated, Validated
+import Data ( Synset(..), Unvalidated, Validated, OneWN
             , Validation(..), SourceValidation, singleton
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
-            , showLongWNPOS, synsetPOS, unsafeLookup
-            , validate, validation )
-import Export ( DBSynset(..), calculateOffsets, makeIndexIndex, newline
-              , showDBSynset, showIndex, synsetsToSynsetJSONs )
+            -- , showLongWNPOS, synsetPOS
+            , unsafeLookup
+            -- , validate
+            , validation )
+import Export ( -- DBSynset(..), calculateOffsets, makeIndexIndex, newline
+              -- , showDBSynset, showIndex,
+                synsetsToSynsetJSONs )
 import Parse (parseLexicographer)
-import Validate ( makeIndex, Index, indexSynsets, oneLangIndex
-                , validateSynsets, checkIndexNoDuplicates )
+import Validate ( makeIndex, ValIndex, SynsetMap, mapSynsets, removeInterWNRelations
+                , validateSynsets )
 ----------------------------------
 --import Debug.Trace (trace)
 import Control.Monad (unless,mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
-import Data.Bifunctor (Bifunctor(..))
+--import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFileOrFail)
 import Data.ByteString.Builder (hPutBuilder)
+import Data.Coerce (coerce)
 import Data.Either (partitionEithers)
-import Data.List (intercalate, find, intersperse)
+import Data.List (intercalate, find--, intersperse
+                 )
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -42,11 +47,11 @@ import qualified Data.Text.IO as TIO
 import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 import qualified Data.Text.Read as TR
-import Data.Traversable (mapAccumL)
+--import Data.Traversable (mapAccumL)
 import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
 import Development.Shake.FilePath ((<.>), (-<.>), splitFileName, takeDirectory)
-import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryIfMissing
+import System.Directory ( canonicalizePath, doesDirectoryExist--, createDirectoryIfMissing
                         , doesDirectoryExist, doesPathExist, withCurrentDirectory )
 import System.FilePath ((</>), normalise, equalFilePath)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
@@ -57,7 +62,7 @@ import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBufferi
 -- are considered.)
 data Config = Config
   { -- | Only consider WordNet of name
-    oneLang :: Maybe Text
+    oneWN :: OneWN
   -- | contains the filepaths to the directory of each WordNet
   , wnPaths :: Map Text FilePath
   -- | maps lexicographer filenames to their numerical ids
@@ -101,7 +106,7 @@ canonicalDir filepath' = do
   
 
 readConfig :: Maybe Text -> FilePath -> FilePath -> IO Config
-readConfig oneLang wnPath configurationDir = do
+readConfig oneWN wnPath configurationDir = do
   lexNamesInput              <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
   relationsInput             <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
   (wnNames, wnRelativePaths) <- unzip <$> readTSVwith (configurationDir </> "wns.tsv") wnsReader
@@ -111,7 +116,7 @@ readConfig oneLang wnPath configurationDir = do
       canonicToDomain    = toMap toCanonicToDomain relationsInput
       textToLexRelations = toMap toTextToLexRelations relationsInput
       wnPaths            = toMap id $ zip wnNames wnAbsolutePaths
-  return $ Config { oneLang, lexnamesToId, textToCanonicNames
+  return $ Config { oneWN, lexnamesToId, textToCanonicNames
                   , canonicToDomain, textToLexRelations
                   , mainWNDir = wnPath, wnPaths
                   }
@@ -146,8 +151,8 @@ type App = ReaderT Config IO
 
 wnLexFiles :: App (NonEmpty (Text, FilePath))
 wnLexFiles = do
-  Config{wnPaths, oneLang, lexnamesToId} <- ask
-  case oneLang of
+  Config{wnPaths, oneWN, lexnamesToId} <- ask
+  case oneWN of
     Just wnName -> return $ go lexnamesToId $ wnPath wnPaths wnName
     Nothing     -> return . sconcat . NE.fromList . map (go lexnamesToId . wnPath wnPaths) $ M.keys wnPaths
   where
@@ -173,8 +178,8 @@ parseLexicographerFiles filePaths = do
   lexFilesSynsetsOrErrors <- mapM (uncurry parseLexicographerFile) filePaths
   case sconcat lexFilesSynsetsOrErrors of
     Success synsets ->
-      let validIndex = checkIndexNoDuplicates $ makeIndex synsets
-      in return $ validate (`validateSynsets` synsets) validIndex
+      let (synsetMap, validIndex) = makeIndex synsets
+      in return $ validateSynsets validIndex synsetMap synsets
     Failure sourceErrors -> return $ Failure sourceErrors
 
 lexicographerFilesJSON :: FilePath -> App ()
@@ -183,8 +188,8 @@ lexicographerFilesJSON outputFile = do
   result <- getValidated
   case result of
     Failure errors -> liftIO $ prettyPrintList errors
-    Success (_, synsets) -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
-                            in liftIO
+    Success (_, _, synsets) -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
+                               in liftIO
                                $ withFile outputFile WriteMode (`write` jsonBuilder) 
   where
     write handle builder = do
@@ -199,63 +204,60 @@ prettyPrintList = mapM_ (putDoc . pretty)
 buildFiles :: App (NonEmpty FilePath)
 buildFiles = build *> wnFilePaths
 
-getValidated :: App (SourceValidation (Index (Synset Unvalidated), NonEmpty (Synset Validated)))
+getValidated :: App (SourceValidation (SynsetMap Validated, ValIndex, NonEmpty (Synset Validated)))
 -- | validate all lexicographer files and return the synset index and
 -- a nonempty list of their validated synsets
 getValidated = do
   lexFilePaths <- buildFiles
-  Config{oneLang} <- ask
-  -- we first read the indices from the cache and sequence them; we
-  -- can't merge them now because we need to validate the synsets from
-  -- each file as a unit, or else we get spurious sort errors
-  validationIndices <- liftIO $ sequenceA <$> mapM (readCachedFileIndex oneLang) lexFilePaths
-  let validationIndex = bimap id sconcat validationIndices
-  case (validationIndex, validationIndices) of
-    (Failure parseErrors, _)
+  Config{oneWN} <- ask
+  validationCaches <- liftIO $ sequenceA <$> mapM (readCachedFileIndex oneWN) lexFilePaths
+  let validationCache = fmap sconcat validationCaches
+  case validationCache of
+    Failure parseErrors
       -> return $ Failure parseErrors
-    (Success index, Success indices)
-      -> case sconcat $ NE.map (validateFileSynsets index) indices of
-           Success validatedSynsets -> return $ Success (index, validatedSynsets)
+    (Success (synsetMap, index))
+      -> case go synsetMap index of
+           Success validatedSynsets -> return $ Success (coerce synsetMap, index, validatedSynsets)
            Failure errors -> return $ Failure errors
-    (Success _, Failure impossible) -> return $ Failure impossible  -- never happens
   where
-    validateFileSynsets :: Index (Synset Unvalidated) -> Index (Synset Unvalidated)
+    go :: SynsetMap Unvalidated -> ValIndex
        -> SourceValidation (NonEmpty (Synset Validated))
-    validateFileSynsets index targetIndex =
-     case indexSynsets targetIndex of
+    go synsetMap index =
+     case mapSynsets synsetMap of
        [] -> error "No synsets in target index" -- never happens
-       (x:synsets) -> validateSynsets index (x:|synsets)
+       (x:synsets) -> validateSynsets index synsetMap (x:|synsets)
 
 validateLexicographerFile :: FilePath -> App ()
 -- | Validates lexicographer file without semantically validating all
 -- other files (they must be syntactically valid, though)
 validateLexicographerFile filePath = do
-  Config{oneLang} <- ask
+  Config{oneWN} <- ask
   normalFilePath <- liftIO $ canonicalizePath filePath
   lexFilePaths <- buildFiles
   liftIO $
     case NE.partition (equalFilePath normalFilePath) lexFilePaths of
-      ([_], otherFilePaths) -> liftIO $ go oneLang normalFilePath otherFilePaths
+      ([_], x:otherFilePaths) -> go oneWN normalFilePath (x:|otherFilePaths)
+      ([_], []) -> go oneWN normalFilePath $ singleton normalFilePath
       ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
       _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
-    go oneLang fileToValidate lexFilePaths = do
-      validationTargetFileIndex <- readCachedFileIndex oneLang fileToValidate
-      -- FIXME: use unionWith instead of sconcat?
-      validationOtherFileIndices <- sequenceA
-                                 <$> mapM (readCachedFileIndex oneLang) lexFilePaths
-      case (validationOtherFileIndices, validationTargetFileIndex) of
+    go oneWN fileToValidate lexFilePaths = do
+      validationTargetCache <- readCachedFileIndex oneWN fileToValidate
+      validationOtherFileCaches <- sconcat
+                                   <$> mapM (readCachedFileIndex oneWN) lexFilePaths
+      case (validationOtherFileCaches, validationTargetCache) of
         (Failure parseErrors, Success _)
           -> prettyPrintList $ toSingleError parseErrors
         (Failure parseErrors, Failure fileParseErrors)
           -> prettyPrintList (toSingleError parseErrors <> fileParseErrors)
         (Success _, Failure parseErrors)
           -> prettyPrintList parseErrors
-        (Success otherFileIndices, Success targetIndex)
-          -> case indexSynsets targetIndex of
+        (Success (othersSynsetMap, othersIndex), Success (targetSynsetMap, targetIndex))
+          -> case mapSynsets targetSynsetMap of
                [] -> return ()
                (x:synsets)
-                 -> case validateSynsets (sconcat $ targetIndex:|otherFileIndices)
+                 -> case validateSynsets (targetIndex <> othersIndex)
+                                         (targetSynsetMap <> othersSynsetMap)
                                          (x:|synsets) of
                       Success _ -> return ()
                       Failure validationErrors -> prettyPrintList validationErrors
@@ -271,18 +273,18 @@ validateLexicographerFiles = do
   ioAction <- validation prettyPrintList (return . const ()) <$> getValidated
   liftIO ioAction
 
-readCachedFileIndex :: Maybe Text -> FilePath
-  -> IO (SourceValidation (Index (Synset Unvalidated)))
--- | reads lexFile cached index at lexFilePath; if oneLang is not
+readCachedFileIndex :: OneWN -> FilePath
+  -> IO (SourceValidation (SynsetMap a, ValIndex))
+-- | reads lexFile cached index at lexFilePath; if oneWN is not
 -- Nothing, removes relations which point to targets who are part of
 -- other WNs
-readCachedFileIndex oneLang lexFilePath = do
+readCachedFileIndex oneWN lexFilePath = do
   let (dirPath, filePath) = splitFileName lexFilePath
       indexPath = dirPath </> ".cache" </> filePath <.> "index"
   decodeResult <- decodeFileOrFail indexPath
   case decodeResult of
     Left (_, message) -> error $ unwords ["You probably have a corrupted cache; please delete it and try again\nFailed with message:", message]
-    Right index' -> return $ bimap id (oneLangIndex oneLang) index'
+    Right cached -> return $ fmap (\(synsetMap, index) -> (removeInterWNRelations oneWN synsetMap, index)) cached
 
 ---
 -- cache
@@ -313,33 +315,32 @@ build = do
      cacheFileIndex :: Text -> FilePath -> FilePath -> App ()
      cacheFileIndex wnName lexFilePath outFilePath = do
        result <- parseLexicographerFile wnName lexFilePath
-       let validIndex = bimap id makeIndex result
+       let validIndex = fmap makeIndex result
        -- valid index has no duplicates, but may have invalid synsets
-       liftIO . encodeFile outFilePath
-         $ validate checkIndexNoDuplicates validIndex
+       liftIO $ encodeFile outFilePath validIndex
 
-toWNDB :: FilePath -> App ()
-toWNDB outputDir = do
-  Config{lexnamesToId, textToLexRelations} <- ask
-  _ <- liftIO $ createDirectoryIfMissing True outputDir
-  ioAction <- validation prettyPrintList (go textToLexRelations lexnamesToId) <$> getValidated
-  _  <- liftIO ioAction
-  return ()
-  where
-    go :: Map Text Text -> Map Text Int -> (Index (Synset a), NonEmpty (Synset Validated)) -> IO ()
-    go relationsMap lexicographerMap (index, synsets) = do
-      mapM_ toData dbSynsetsByPOS
-      mapM_ toIndex [N,V,A,R] -- no S
-      where
-        synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
-        -- we need to calculate all offsets before writing the file
-        (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
-        indexIndex = makeIndexIndex index
-        write filename wnPos = TIO.writeFile (outputDir </> filename <.> T.unpack (showLongWNPOS wnPos))
-        makeOffsetMap currOffsetMap = calculateOffsets 0 currOffsetMap relationsMap lexicographerMap index
-        toData posDBsynsets@(x:|_) =
-          let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset offsetMap) posDBsynsets
-          in write "data" (pos x) output
-        toIndex wnPOS =
-          let output = mconcat . intersperse newline $ showIndex wnPOS relationsMap offsetMap index indexIndex
-          in write "index" wnPOS output
+-- toWNDB :: FilePath -> App ()
+-- toWNDB outputDir = do
+--   Config{lexnamesToId, textToLexRelations} <- ask
+--   _ <- liftIO $ createDirectoryIfMissing True outputDir
+--   ioAction <- validation prettyPrintList (go textToLexRelations lexnamesToId) <$> getValidated
+--   _  <- liftIO ioAction
+--   return ()
+--   where
+--     go :: Map Text Text -> Map Text Int -> (ValIndex (Synset a), NonEmpty (Synset Validated)) -> IO ()
+--     go relationsMap lexicographerMap (index, synsets) = do
+--       mapM_ toData dbSynsetsByPOS
+--       mapM_ toIndex [N,V,A,R] -- no S
+--       where
+--         synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
+--         -- we need to calculate all offsets before writing the file
+--         (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
+--         indexIndex = makeIndexIndex index
+--         write filename wnPos = TIO.writeFile (outputDir </> filename <.> T.unpack (showLongWNPOS wnPos))
+--         makeOffsetMap currOffsetMap = calculateOffsets 0 currOffsetMap relationsMap lexicographerMap index
+--         toData posDBsynsets@(x:|_) =
+--           let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset offsetMap) posDBsynsets
+--           in write "data" (pos x) output
+--         toIndex wnPOS =
+--           let output = mconcat . intersperse newline $ showIndex wnPOS relationsMap offsetMap index indexIndex
+--           in write "index" wnPOS output

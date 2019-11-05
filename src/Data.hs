@@ -101,10 +101,13 @@ tshow = T.pack . show
 
 type IdRelation = Maybe (RelationName, WordSenseForm)
 
+type WNName = Text
+type OneWN = Maybe WNName
+
 data WNid =
   WNid { pos     :: WNPOS
        , lexname :: Text
-       , wnName  :: Text
+       , wnName  :: WNName
        , lexForm :: WordSenseForm
        , idRel   :: IdRelation
        }
@@ -345,12 +348,18 @@ instance Pretty WNError where
   pretty (DuplicateSynsetRelation synsetRelations)
     = prettyDuplicate "synset relation" synsetRelations
   pretty (MissingRelationTarget wnObj (Relation relationName target))
-    =   "error: Missing "
+    =   "error: Missing"
     <+> pretty relationName
     <+> pretty wnObj
     <+> "relation target" <+> pretty target
-  pretty (AmbiguousRelationTarget _ (Relation relationName target) _)
-    = pretty relationName <+> pretty target -- []
+  pretty (AmbiguousRelationTarget wnObj (Relation relationName target) _)
+    = "error: Ambiguous"
+    <+> pretty wnObj
+    <+> "relation"
+    <+> pretty relationName
+    <+> "with target"
+    <+> pretty target
+    -- [] could either be _
   pretty (UnsortedExamples sequences)
     = prettyUnordered "examples" sequences
   pretty (UnsortedFrames sequences)

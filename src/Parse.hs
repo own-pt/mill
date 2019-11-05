@@ -111,7 +111,7 @@ synset lexicographerFileId = do
   wordSenses  <- wordSenseStatement `NC.endBy1` linebreak
   definition  <- definitionStatement <* linebreak
   examples    <- exampleStatement `endBy` linebreak
-  extra       <- (fmap WNVerb framesStatement <|> emptyExtra) <* linebreak
+  extra       <- fmap WNVerb framesStatement <* linebreak <|> emptyExtra
   relations   <- synsetRelationStatement `endBy` linebreak
   endOffset   <- getOffset
   return $ Synset{ comments
@@ -148,7 +148,7 @@ commentsP = commentLine `sepEndBy` linebreak
 statement :: Text -> Parser a -> Parser a
 statement name parser = L.nonIndented spaceConsumer go
   where
-    go = symbol name *> symbol ":" *> parser
+    go = symbol (T.append name ":") *> parser
 
 definitionStatement :: Parser Text
 definitionStatement = statement "d" textBlock
@@ -210,8 +210,8 @@ wordSenseIdentifier = WordSenseId . toWNid <$> identifier
 identifier :: Parser (LexicographerFileId, WordSenseForm, IdRelation)
 identifier =
   (,,)
-  <$>  (try lexicographerIdentifier <|> reader fst3)
-  <*>  fmap WordSenseForm word <*> optional identifyingRelation
+  <$> (try lexicographerIdentifier <|> reader fst3)
+  <*> fmap WordSenseForm word <*> optional identifyingRelation
   where
     lexicographerIdentifier = do
       wnName <- wnNameR
@@ -219,7 +219,7 @@ identifier =
     identifyingRelation =
       (,)
       <$> (symbol "(" *> word)
-      <*> (fmap WordSenseForm word <* symbol ")")
+      <*> (fmap WordSenseForm . lexeme $ takeWhile1P Nothing (\c -> not $ isSpace c || c == ')') <* symbol ")")
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go

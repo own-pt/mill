@@ -1,17 +1,17 @@
 module Main where
 
+import Data (OneWN)
 import Lib ( canonicalDir
            , validateLexicographerFile
            , validateLexicographerFiles
            , lexicographerFilesJSON
            , readConfig
-           , toWNDB
-           , Config(oneLang)
+--           , toWNDB
+           , Config(oneWN)
            )
 
 import Data.Maybe (fromMaybe)
 import Control.Monad.Reader (ReaderT(..))
-import Data.Text (Text)
 import qualified Data.Text as T
 import Options.Applicative ( (<|>), argument, command, customExecParser, eitherReader, flag, fullDesc
                            , header, help, helper, hsubparser, info, long, metavar, option, Parser
@@ -19,13 +19,13 @@ import Options.Applicative ( (<|>), argument, command, customExecParser, eitherR
                            , ReadM, short, str, value
                            )
 import System.Directory (doesDirectoryExist)
+--import Debug.Trace (trace)
 
 type ConfigDir   = Maybe FilePath
-type OneLanguage = Maybe Text
 
 data ExportFormat = WNJSON | WNDB deriving (Show)
 
-data MillCommand = MillCommand ConfigDir OneLanguage MillSubCommand
+data MillCommand = MillCommand ConfigDir OneWN MillSubCommand
 
 data MillSubCommand 
   = Validate FilePath
@@ -36,7 +36,7 @@ showHelpOnErrorExecParser :: ParserInfo a -> IO a
 showHelpOnErrorExecParser = customExecParser (prefs showHelpOnError)
 
 parseSubCommand :: Parser MillSubCommand -> Parser MillCommand
-parseSubCommand subcommand = MillCommand <$> configDir <*> oneLanguage <*> subcommand
+parseSubCommand subcommand = MillCommand <$> configDir <*> oneWordNet <*> subcommand
   where
     configDir = option (Just <$> str)
       (metavar "CONFIGDIR" <> short 'c' <> long "config-dir"
@@ -57,14 +57,14 @@ parseCommand = hsubparser $
    (info (helper <*> parseSubCommand parseExportCommand)
    (fullDesc <> progDesc "Export lexicographer files"))
 
-parseOneLanguage :: ReadM OneLanguage
-parseOneLanguage = eitherReader go
+parseOneWN :: ReadM OneWN
+parseOneWN = eitherReader go
   where
     go "" = Left "Must specify a valid WordNet name"
     go lang = Right . Just . T.strip $ T.pack lang
 
-oneLanguage :: Parser OneLanguage
-oneLanguage = option parseOneLanguage
+oneWordNet :: Parser OneWN
+oneWordNet = option parseOneWN
   (metavar "LANG" <> short 'l' <> long "lang"
    <> help "Only consider WordNet LANG"
    <> value Nothing)
@@ -105,30 +105,30 @@ main = do
     $ info (helper <*> parseCommand)
     (fullDesc <> progDesc millProgDesc <> header "mill")
   case commandToRun of
-    MillCommand configDir oneLang subcommand ->
+    MillCommand configDir oneWN subcommand ->
       case subcommand of
-        Validate inputPath -> validate configDir oneLang inputPath
+        Validate inputPath -> validate configDir oneWN inputPath
         Export format inputPath outputPath
-          -> export configDir oneLang format inputPath outputPath
+          -> export configDir oneWN format inputPath outputPath
 
-getConfig :: ConfigDir -> OneLanguage -> FilePath -> IO Config
-getConfig configDir' oneLang wnPath' = do
+getConfig :: ConfigDir -> OneWN -> FilePath -> IO Config
+getConfig configDir' oneWN wnPath' = do
   wnPath    <- canonicalDir wnPath'
   configDir <- canonicalDir $ fromMaybe wnPath' configDir'
-  readConfig oneLang wnPath configDir
+  readConfig oneWN wnPath configDir
 
-validate :: ConfigDir -> OneLanguage -> FilePath -> IO ()
-validate configDir oneLang inputPath = do
-  config <- getConfig configDir oneLang inputPath
+validate :: ConfigDir -> OneWN -> FilePath -> IO ()
+validate configDir oneWN inputPath = do
+  config <- getConfig configDir oneWN inputPath
   isDirectory <- doesDirectoryExist inputPath
   runReaderT (if isDirectory
                then validateLexicographerFiles
                else validateLexicographerFile inputPath)
     config
 
-export :: ConfigDir -> OneLanguage -> ExportFormat -> FilePath -> FilePath -> IO ()
-export configDir oneLang format inputPath outputPath = do
-  config <- getConfig configDir oneLang inputPath
+export :: ConfigDir -> OneWN -> ExportFormat -> FilePath -> FilePath -> IO ()
+export configDir oneWN format inputPath outputPath = do
+  config <- getConfig configDir oneWN inputPath
   case format of
     WNJSON -> exportJSON outputPath config
     WNDB -> exportWNDB outputPath config
@@ -137,7 +137,7 @@ exportJSON :: FilePath -> Config -> IO ()
 exportJSON outputFile = runReaderT $ lexicographerFilesJSON outputFile
 
 exportWNDB :: FilePath -> Config -> IO ()
-exportWNDB outputDir config =
-  case oneLang config of
+exportWNDB _outputDir config =
+  case oneWN config of
         Nothing -> error "You must specify a language for WNDB export"
-        Just _ -> runReaderT (toWNDB outputDir) config
+        Just _ -> error "Not implemented yet" --runReaderT (toWNDB outputDir) config
