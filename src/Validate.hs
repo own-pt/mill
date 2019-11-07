@@ -36,20 +36,6 @@ import Prelude hiding (lookup)
 -- [] use Reader monad so that we don't need to pass arguments
 -- everywhere
 
---- idea: wordsenses are identified by their lexfile, lexical form,
---- and (if necessary) an unambiguous relation + lexform. we start
---- with a validation index which maps (lexfile, lexical form) to
---- synsets; we then check that all references are unique; while doing
---- so we add a temporary meaningless id to each reference (lexfile,
---- sourcePosition) which allows us to build the final index, which is
---- used by the rest of the application
-
---- having two indices will not work because it would hinder
---- incremental validation (only validating one file against several)
-
---- although we don't really need two indices (only for wndb export,
---- or for finding all references to an id [not implemented yet])
-
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
 type Index a     = TrieMap WrappedIntMap Char (Either String a)
@@ -183,7 +169,7 @@ checkWordSense index synsetMap wordSense@(WSense wID extra wordPointers)
     wordPOS = pos (coerce wID :: WNid)
     checkWordSensePointersOrderNoDuplicates =
       checkSortNoDuplicates UnsortedWordPointers DuplicateWordRelation wordPointers
-    
+
 
 checkWordSensePointersTargets :: ValIndex -> SynsetMap Unvalidated -> [WordPointer]
   -> WNValidation [WordPointer]
@@ -196,32 +182,35 @@ checkRelationsTargets :: ValIndex -> SynsetMap Unvalidated -> WNObj -> [Relation
   -> WNValidation [Relation]
 checkRelationsTargets index synsetMap wnObj = traverse checkRelation
   where
-    checkRelation relation@(Relation _ wnid@WNid{idRel}) =
+    checkRelation relation@(Relation _ wnid@WNid{lexForm = targetLexForm, idRel}) =
       checkCandidates maybeCandidates idRel
       where
         targetSenseKey = indexKey wnid
         maybeCandidates = lookupIndex targetSenseKey index synsetMap
-        ambiguityError = Failure . singleton . AmbiguousRelationTarget wnObj relation 
+        ambiguityError = Failure . singleton . AmbiguousRelationTarget wnObj relation
         missingRelationError = Failure . singleton $ MissingRelationTarget wnObj relation
         checkCandidates []  _ = missingRelationError
-        checkCandidates [_] _ = Success relation
+        checkCandidates [_] Nothing = Success relation
         checkCandidates (x:candidates) Nothing = ambiguityError (x:|candidates)
-        checkCandidates candidates (Just (relName, targetLexForm))
+        checkCandidates candidates (Just (relName, idRelTargetLexForm))
           = case filter isTarget candidates of
               [] -> missingRelationError
               [_] -> Success relation
               x:xs -> ambiguityError $ x:|xs
           where
             isTarget Synset{relations, wordSenses}
-              = any relationIsTarget relations
-              || (any pointerIsTarget . concatMap pointers $ NE.filter targetWord wordSenses)
+              = any (relationIsTarget . coerce) relations
+              || any (relationIsTarget . coerce) (concatMap pointers targetSenses)
               where
-                relationIsTarget (SynsetRelation (Relation name WNid{lexForm}))
-                  = name == relName && lexForm == targetLexForm
-                pointerIsTarget (WordPointer (Relation name WNid{lexForm}))
-                  = name == relName && lexForm == targetLexForm
-                targetWord (WSense (WordSenseId WNid{lexForm}) _ _) = lexForm == targetLexForm
-        
+                relationIsTarget (Relation name WNid{lexForm})
+                  = name == relName && lexForm == idRelTargetLexForm
+                targetWord (WSense (WordSenseId WNid{lexForm}) _ _)
+                  = lexForm == targetLexForm
+                targetSenses -- actually there should only be one; if
+                             -- there's more validation will catch it
+                  = NE.filter targetWord wordSenses
+
+
 
 checkExtra :: WNPOS -> WNExtra -> WNValidation WNExtra
 checkExtra _ WNEmpty = Success WNEmpty
