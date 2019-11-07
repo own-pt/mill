@@ -45,7 +45,7 @@ NAME               = "name"
 SENSEKEY           = "senseKey"
 FRAME              = "frame"
 FRAMES             = "frames"
-WORDSENSE          = "wordsense"
+WSENSE          = "wordsense"
 SYNSET             = "synset"
 RELATIONS          = "relations"
 SOURCE_BEGIN       = "sourceBegin"
@@ -75,16 +75,6 @@ WN_ANTONYM_OF = WN30["antonymOf"]
 WN_SIMILAR_TO = WN30["similarTo"]
 WN_SYNTACTIC_MARKER = WN30[SYNTACTIC_MARKER]
 WN_EXAMPLE = WN30[EXAMPLE]
-
-PREFERENTIAL_RELATION_MAP = {"AdjectiveSatelliteSynset": [WN_SIMILAR_TO],
-                             "AdjectiveSynset": [WN_ANTONYM_OF,
-                                                 WN_PERTAINS_TO,
-                                                 WN_SIMILAR_TO],
-                             "NounSynset": [WN_INSTANCE_OF, WN_HYPONYM_OF],
-                             "VerbSynset": [WN_HYPONYM_OF, WN_ENTAILS],
-                             "AdverbSynset": [WN_PERTAINS_TO]}
-
-INDISTINGUISHABLES = 0
 
 ###
 ## rdf -> text
@@ -190,66 +180,96 @@ def get_clashes(graph, lexicographer_file, synset, word_sense):
 WN_ID_RELATION = WN30['idRelation']
 WN_ID_TARGET = WN30['idTarget']
 WN_ID_WORDSENSE = WN30['idWordSense']
+WN_TEMP_ID = WN30['tempId']
+WN_IN_SYNSET = WN30["inSynset"]
+SYNSET = "synset"
+WSENSE = "wordsense"
+
+PREFERENTIAL_RELATION_MAP = {"AdjectiveSatelliteSynset": [(SYNSET, WN_SIMILAR_TO)],
+                             "AdjectiveSynset": [(WSENSE, WN_ANTONYM_OF),
+                                                 (WSENSE, WN_PERTAINS_TO),
+                                                 (SYNSET, WN_SIMILAR_TO)],
+                             "NounSynset": [(SYNSET, WN_INSTANCE_OF), (SYNSET, WN_HYPONYM_OF)],
+                             "VerbSynset": [(SYNSET, WN_HYPONYM_OF), (SYNSET, WN_ENTAILS)],
+                             "AdverbSynset": [(WSENSE, WN_PERTAINS_TO)]}
+
+INDISTINGUISHABLES = 0
 
 def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
-    def is_clash(relation, target, objtype):
-        clashed = False
-        if objtype == "synset":
+    def is_clash(relation, target_lexical_form, objtype):
+        if objtype == SYNSET:
             for other_synset in clashes:
                 for other_target in graph.objects(other_synset, relation):
-                    if target == other_target:
-                        clashed = True
-                        break
-        elif objtype == "wordsense":
+                    for other_sense in graph.objects(other_target, WN_CONTAINS_WORDSENSE):
+                        other_target_lexical_form = graph.value(other_sense, WN_LEXICAL_FORM)
+                        if target_lexical_form == other_target_lexical_form:
+                            return True # clashed
+        elif objtype == WSENSE:
             for other_synset in clashes:
                 for other_word_sense in graph.objects(other_synset, WN_CONTAINS_WORDSENSE):
                     for other_target in graph.objects(other_word_sense, relation):
-                        if target == other_target:
-                            clashed = True
-                            break
+                        other_target_lexical_form = graph.value(other_target, WN_LEXICAL_FORM)
+                        if target_lexical_form == other_target_lexical_form:
+                            return True # clashed
         else:
-            raise Exception("objtype must be 'synset' or 'wordsense'")
-        return clashed
+            assert False
+        return False
     #
     def find_any_relation():
         global INDISTINGUISHABLES
         id_relation = None
+        # try synset relations
         for relation, obj in graph.predicate_objects(synset):
-            if graph.value(obj, WN_CONTAINS_WORDSENSE): # obj is synset too
-                if not is_clash(relation, obj, "synset"):
-                    id_relation = (relation, obj)
-                    break
-        if id_relation and None not in id_relation:
-            return id_relation
-        else:
-            for relation, obj in graph.predicate_objects(word_sense):
-                if graph.value(predicate=WN_CONTAINS_WORDSENSE, object=obj):
-                    # obj is wordsense too
-                    if not is_clash(relation, obj, "wordsense"):
-                        id_relation = (relation, obj)
-                        break
-            if id_relation and None not in id_relation:
-                return id_relation
-            else:
-                # [] return something here
-                INDISTINGUISHABLES += 1
-                #print("no identifying relation found for {}".format(word_sense))
+            # for each target synset relation
+            for sense in graph.objects(obj, WN_CONTAINS_WORDSENSE):
+                # for each sense of relation target synset
+                obj_lexical_form = graph.value(sense, WN_LEXICAL_FORM)
+                if not is_clash(relation, obj_lexical_form, "synset"):
+                    return (relation, obj_lexical_form)
+        # try sense relations
+        for relation, obj in graph.predicate_objects(word_sense):
+            if graph.value(predicate=WN_CONTAINS_WORDSENSE, object=obj):
+                # obj is wordsense too
+                obj_lexical_form = graph.value(obj, WN_LEXICAL_FORM)
+                if not is_clash(relation, obj_lexical_form, "wordsense"):
+                    return (relation, obj_lexical_form)
+        # last resort: create artificial lexicalId relation
+        INDISTINGUISHABLES += 1
+        for i in range(0,20):
+            lexical_id_form = Literal(str(i))
+            lexical_id_sense = graph.value(predicate=WN_LEXICAL_FORM, object=lexical_id_form)
+            assert lexical_id_sense
+            graph.set((word_sense, WN_TEMP_ID, lexical_id_sense))
+            if not is_clash(WN_TEMP_ID, lexical_id_sense, "wordsense"):
+                return (WN_TEMP_ID, lexical_id_form)
     #
     def find_id_relation():
-        id_relation = None
         if clashes:
+            # try distinguishing by sibling senses
+            for sibling_sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
+                sibling_lexical_form = graph.value(sibling_sense, WN_LEXICAL_FORM)
+                if not is_clash(WN_LEXICAL_FORM, sibling_lexical_form, "wordsense"):
+                    return (WN_IN_SYNSET, sibling_lexical_form)
+            # try preferential relations second
             synset_type = graph.value(synset, RDF["type"])
             preferential_relations = PREFERENTIAL_RELATION_MAP[str(synset_type)]
-            for relation in preferential_relations:
-                target = graph.value(synset, relation)
-                if target and not is_clash(relation, target, "synset"):
-                    id_relation = (relation, target)
-                    break
-            if id_relation and None not in id_relation:
-                return id_relation
-            else:
-                return find_any_relation()
-        else:
+            for (wn_obj, relation) in preferential_relations:
+                if wn_obj == SYNSET:
+                    for target in graph.objects(synset, relation):
+                        for sense in graph.objects(target, WN_CONTAINS_WORDSENSE):
+                            sense_lexical_form = graph.value(sense, WN_LEXICAL_FORM)
+                            if not is_clash(relation, sense_lexical_form, wn_obj):
+                                return (relation, sense_lexical_form)
+                elif wn_obj == WSENSE:
+                    for sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
+                        for target in graph.objects(sense, relation):
+                            target_lexical_form = graph.value(target, WN_LEXICAL_FORM)
+                            if not is_clash(relation, target_lexical_form, wn_obj):
+                                return (relation, target_lexical_form)
+                else:
+                    assert False
+            return find_any_relation()
+        else: # no clashes
             return None
     #
     clashes = get_clashes(graph, lexicographer_file, synset, word_sense)
@@ -271,6 +291,9 @@ def pick_synset_ids(graph, lexicographer_file, synset):
     return None
 
 def pick_wn_ids(graph):
+    graph.remove((None, WN_ID_RELATION, None))
+    graph.remove((None, WN_ID_WORDSENSE, None))
+    graph.remove((None, WN_ID_TARGET, None))
     lex_files = set(graph.objects(predicate=WN_LEXICOGRAPHER_FILE))
     for lex_file in lex_files:
         for synset in graph.subjects(WN_LEXICOGRAPHER_FILE, lex_file):
@@ -285,11 +308,7 @@ def word_sense_id(graph, lexicographer_file, word_sense, synset=None):
         if id_relation and id_target:
             _, name = r.namespace.split_uri(id_relation)
             id_relation_txt_name = SYNSET_RELATIONS.get(name, False) or WORD_RELATIONS.get(name)
-            target_id_wordsense = graph.value(id_target, WN_ID_WORDSENSE)
-            if target_id_wordsense:
-                id_target = target_id_wordsense
-            target_lexical_form = graph.value(id_target, WN_LEXICAL_FORM)
-            return (id_relation_txt_name, target_lexical_form)
+            return (id_relation_txt_name, id_target)
         elif id_relation or id_target:
             assert False
         else:
@@ -393,8 +412,8 @@ def print_word_sense(graph, word_sense, lexicographer_file, write):
                     target_lexfile = graph.value(synset, WN_LEXICOGRAPHER_FILE)
                     relations.append((predicate_txt_name,
                                       word_sense_id(graph, target_lexfile, obj)))
-                else:
-                    raise LookupError("relation {} target {} not wordsense".format(predicate_name, obj))
+                # else:
+                #     raise LookupError("relation {} target {} not wordsense".format(predicate_name, obj))
         if frames:
             frames.sort()
             write(" {} {}".format(
@@ -441,7 +460,7 @@ def to_graph(synsets_gen):
 
     def add_word_sense(lang, wordsense, lexicographer_file, synset_id):
         wordsense_id = make_id(lang, lexicographer_file, wordsense[LEXICAL_FORM]
-                               , wordsense[LEXICAL_ID], WORDSENSE)
+                               , wordsense[LEXICAL_ID], WSENSE)
         g.add((synset_id, WN30[CONTAINS_WORDSENSE], wordsense_id))
         g.add((wordsense_id, WN30[LEXICAL_ID], Literal(wordsense[LEXICAL_ID])))
         g.add((wordsense_id, WN30[LEXICAL_FORM], Literal(wordsense[LEXICAL_FORM])))
@@ -450,7 +469,7 @@ def to_graph(synsets_gen):
         if syntacticMarker:
             g.add((wordsense_id, WN_SYNTACTIC_MARKER, Literal(syntacticMarker)))
         for relation in wordsense[POINTERS]:
-            add_relation(wordsense_id, relation, WORDSENSE)
+            add_relation(wordsense_id, relation, WSENSE)
         frames = wordsense.get(FRAMES, [])
         for frame in frames:
             add_frame(wordsense_id, frame)
