@@ -127,8 +127,10 @@ def print_graph(graph, output_dir):
         CURRENT_LANG = lang
         output_dir = os.path.join(output_dir, lang)
         os.makedirs(output_dir, exist_ok=True)
+        print(lang)
         for lexicographer_file in lex_files:
             print_lexfile(graph, lexicographer_file, output_dir)
+            print("  {}".format(lexicographer_file))
 
 
 def sort_word_senses(graph, synset):
@@ -201,7 +203,7 @@ def relation_preference(relation_obj):
     return not PREFERENTIAL_RELATION_MAP.get(relation_obj[0], False)
 
 def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
-    # [] use global hashtable to decide which lexical form to print
+    # [] don't forget prints and asserts
     def is_clash(relation, target_lexical_form, objtype):
         if objtype == SYNSET:
             for other_synset in clashes:
@@ -222,22 +224,28 @@ def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
         return False
     #
     def find_any_relation():
+        from itertools import chain
         global INDISTINGUISHABLES
         id_relation = None
         # try synset relations
-        for relation, obj in sorted(graph.predicate_objects(synset), key=relation_preference):
-            # for each target synset relation
-            for sense in graph.objects(obj, WN_CONTAINS_WORDSENSE):
-                # for each sense of relation target synset
-                obj_lexical_form = graph.value(sense, WN_LEXICAL_FORM)
-                if not is_clash(relation, obj_lexical_form, "synset"):
-                    return (relation, obj_lexical_form)
-        # try sense relations
-        for relation, obj in sorted(graph.predicate_objects(word_sense), key=relation_preference):
-            if graph.value(predicate=WN_CONTAINS_WORDSENSE, object=obj):
-                # obj is wordsense too
+        synset_relations = filter(lambda r_o: r_o[0] != WN_CONTAINS_WORDSENSE, graph.predicate_objects(synset))
+        sense_relations  = list(graph.predicate_objects(word_sense))
+        for relation, obj in sorted(chain(synset_relations, sense_relations), key=relation_preference):
+            target_senses = list(graph.objects(obj, WN_CONTAINS_WORDSENSE))
+            # obj is synset
+            if target_senses:
+                # for each target synset relation
+                clashed = False
+                for sense in target_senses:
+                    # for each sense of relation target synset
+                    sense_lexical_form = graph.value(sense, WN_LEXICAL_FORM)
+                    clashed = is_clash(relation, sense_lexical_form, SYNSET)
+                if not clashed:
+                    return (relation, obj)
+            # obj is sense
+            elif graph.value(predicate=WN_CONTAINS_WORDSENSE, object=obj):
                 obj_lexical_form = graph.value(obj, WN_LEXICAL_FORM)
-                if not is_clash(relation, obj_lexical_form, "wordsense"):
+                if not is_clash(relation, obj_lexical_form, WSENSE):
                     return (relation, obj_lexical_form)
         # last resort: create artificial lexicalId relation
         INDISTINGUISHABLES += 1
@@ -284,6 +292,8 @@ def pick_synset_ids(graph, lexicographer_file, synset):
             graph.set((word_sense, WN_ID_RELATION, id_relation))
             graph.set((word_sense, WN_ID_TARGET, id_target))
         else:
+            # if a sense has no clashes make it the ID sense for that
+            # synset
             wordsense_as_id = word_sense
     if not wordsense_as_id:
         wordsense_as_id = graph.value(synset, WN_CONTAINS_WORDSENSE)
@@ -291,14 +301,14 @@ def pick_synset_ids(graph, lexicographer_file, synset):
     return None
 
 def pick_wn_ids(graph):
-    graph.remove((None, WN_ID_RELATION, None))
+    graph.remove((None, WN_ID_RELATION,  None))
     graph.remove((None, WN_ID_WORDSENSE, None))
-    graph.remove((None, WN_ID_TARGET, None))
+    graph.remove((None, WN_ID_TARGET,    None))
     lex_files = set(graph.objects(predicate=WN_LEXICOGRAPHER_FILE))
     for lex_file in lex_files:
         for synset in graph.subjects(WN_LEXICOGRAPHER_FILE, lex_file):
             pick_synset_ids(graph, lex_file, synset)
-    
+
 ###
 
 def word_sense_id(graph, lexicographer_file, word_sense, synset=None):
@@ -308,6 +318,10 @@ def word_sense_id(graph, lexicographer_file, word_sense, synset=None):
         if id_relation and id_target:
             _, name = r.namespace.split_uri(id_relation)
             id_relation_txt_name = SYNSET_RELATIONS.get(name, False) or WORD_RELATIONS.get(name)
+            id_sense = graph.value(id_target, WN_ID_WORDSENSE)
+            if id_sense:
+                id_target = graph.value(id_sense, WN_LEXICAL_FORM)
+                assert id_target, id_sense
             return (id_relation_txt_name, id_target)
         elif id_relation or id_target:
             assert False
