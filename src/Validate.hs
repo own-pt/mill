@@ -12,7 +12,7 @@ module Validate
   , wordSenseKey
   ) where
 
-import Data (Synset(..), Unvalidated, Validated, SourceValidation
+import Data (Synset(..), Unvalidated, Validated, SourceValidation, WNName
             , WSense(..), WNid(..), Validation(..), WordSenseForm(..)
             , SynsetRelation(..),WordPointer(..), WNValidation, WNError(..), WNPOS(..)
             , LexicographerFileId(..), Relation(..), WNObj(..), SourcePosition(..)
@@ -39,7 +39,7 @@ import Prelude hiding (lookup)
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
 type Index a     = TrieMap WrappedIntMap Char (Either String a)
-type SynsetKey = (Text, Text, Int)
+type SynsetKey = (WNName, WNPOS, Text, Int)
 type SynsetMap a = Map SynsetKey (Synset a)
 type ValIndex = TrieMap WrappedIntMap Char (NonEmpty SynsetKey)
 
@@ -52,8 +52,8 @@ makeIndex synsets = (synsetMap, fromListWith' (<>) keyValuePairs)
       NE.map ((, singleton $ synsetKey synset) . wordSenseKey)
       wordSenses
     synsetMap = M.fromList . NE.toList $ NE.zip (NE.map synsetKey synsets) synsets
-    synsetKey Synset{sourcePosition = SourcePosition (beg, _), lexicographerFileId = LexicographerFileId{lexname, wnName}}
-      = (wnName, lexname, beg)
+    synsetKey Synset{sourcePosition = SourcePosition (beg, _), lexicographerFileId = LexicographerFileId{lexname, pos, wnName}}
+      = (wnName, pos, lexname, beg)
 
 wordSenseKey :: WSense -> String
 wordSenseKey (WSense wnWordId _ _)
@@ -185,13 +185,26 @@ checkRelationsTargets index synsetMap wnObj = traverse checkRelation
     checkRelation relation@(Relation _ wnid@WNid{lexForm = targetLexForm, idRel}) =
       checkCandidates maybeCandidates idRel
       where
-        targetSenseKey = indexKey wnid
         maybeCandidates = lookupIndex targetSenseKey index synsetMap
+        targetSenseKey = indexKey wnid
         ambiguityError = Failure . singleton . AmbiguousRelationTarget wnObj relation
         missingRelationError = Failure . singleton $ MissingRelationTarget wnObj relation
         checkCandidates []  _ = missingRelationError
         checkCandidates [_] Nothing = Success relation
         checkCandidates (x:candidates) Nothing = ambiguityError (x:|candidates)
+        checkCandidates candidates (Just ("syn", synonymLexForm))
+        -- [] unhardcode this name; either parse to graph already
+        -- (probs best option) or add synonym relations
+          = case filter isTarget candidates of
+              [] -> missingRelationError
+              [_] -> Success relation
+              x:xs -> ambiguityError $ x:|xs
+          where
+            isTarget Synset{wordSenses}
+              = any targetWord wordSenses
+              where
+                targetWord (WSense (WordSenseId WNid{lexForm}) _ _)
+                  = lexForm == synonymLexForm
         checkCandidates candidates (Just (relName, idRelTargetLexForm))
           = case filter isTarget candidates of
               [] -> missingRelationError

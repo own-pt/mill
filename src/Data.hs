@@ -70,7 +70,7 @@ showLongWNPOS S = "adj"
 data LexicographerFileId
   = LexicographerFileId { pos     :: WNPOS
                         , lexname :: Text
-                        , wnName  :: Text
+                        , wnName  :: WNName
                         }
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary,ToJSON)
