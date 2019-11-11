@@ -20,7 +20,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
-import Text.Megaparsec hiding (State)
+import Text.Megaparsec hiding (State, token)
 import Text.Megaparsec.Char (char, eol)
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
@@ -202,7 +202,7 @@ wordSenseStatement = statement "w" go
       <*> (wordSenseFrames <|> wordSenseMarker <|> emptyExtra)
       <*> wordSensePointers
     wordSenseFrames = fmap WNVerb $ symbol "fs" *> frameNumbers
-    wordSenseMarker = fmap WNAdj $ symbol "marker" *> word
+    wordSenseMarker = fmap WNAdj $ symbol "marker" *> token
 
 wordSenseIdentifier :: Parser WordSenseId
 wordSenseIdentifier = WordSenseId . toWNid <$> identifier
@@ -211,23 +211,27 @@ identifier :: Parser (LexicographerFileId, WordSenseForm, IdRelation)
 identifier =
   (,,)
   <$> (try lexicographerIdentifier <|> reader fst3)
-  <*> fmap WordSenseForm word <*> optional identifyingRelation
+  <*> fmap WordSenseForm senseWord <*> optional identifyingRelation
   where
     lexicographerIdentifier = do
       wnName <- wnNameR
       lexicographerIdP wnName <* char ':'
     identifyingRelation =
       (,)
-      <$> (symbol "(" *> word)
+      <$> (symbol "(" *> senseWord)
       <*> (fmap WordSenseForm . lexeme $ takeWhile1P Nothing (\c -> not $ isSpace c || c == ')') <* symbol ")")
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
   where
-    go =  WordPointer <$> relationP WSenseObj (word <?> "Word pointer")
+    go =  WordPointer <$> relationP WSenseObj (token <?> "Word pointer")
 
-word :: Parser Text
-word = lexeme $ takeWhile1P Nothing (not . isSpace)
+token :: Parser Text
+token = lexeme $ takeWhile1P Nothing (not . isSpace)
+
+senseWord :: Parser Text
+senseWord = lexeme $ takeWhile1P (Just "sense word")
+  (not . (\c -> isSpace c || c `elem` ['(', ')']))
 
 framesStatement :: Parser (NonEmpty FrameId)
 framesStatement = statement "fs" frameNumbers

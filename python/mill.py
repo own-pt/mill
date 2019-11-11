@@ -345,7 +345,7 @@ def print_word_sense_id(wordsense_id, lexicographer_file=None):
     id_relation_txt = ""
     if id_relation:
         (predicate, target_lexical_form) = id_relation
-        id_relation_txt = " ({} {})".format(predicate, target_lexical_form)
+        id_relation_txt = "({} {})".format(predicate, target_lexical_form)
     return "{}{}{}".format(prefix, lexical_form, id_relation_txt)
 
 
