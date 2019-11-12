@@ -6,7 +6,7 @@ import Lib ( canonicalDir
            , validateLexicographerFiles
            , lexicographerFilesJSON
            , readConfig
---           , toWNDB
+           , toWNDB
            , Config(oneWN)
            )
 
@@ -16,7 +16,7 @@ import qualified Data.Text as T
 import Options.Applicative ( (<|>), argument, command, customExecParser, eitherReader, flag, fullDesc
                            , header, help, helper, hsubparser, info, long, metavar, option, Parser
                            , ParserInfo, prefs, progDesc, showHelpOnError
-                           , ReadM, short, str, value
+                           , ReadM, short, str, switch, value
                            )
 import System.Directory (doesDirectoryExist)
 --import Debug.Trace (trace)
@@ -25,7 +25,7 @@ type ConfigDir   = Maybe FilePath
 
 data ExportFormat = WNJSON | WNDB deriving (Show)
 
-data MillCommand = MillCommand ConfigDir OneWN MillSubCommand
+data MillCommand = MillCommand ConfigDir Bool OneWN MillSubCommand
 
 data MillSubCommand 
   = Validate FilePath
@@ -36,12 +36,19 @@ showHelpOnErrorExecParser :: ParserInfo a -> IO a
 showHelpOnErrorExecParser = customExecParser (prefs showHelpOnError)
 
 parseSubCommand :: Parser MillSubCommand -> Parser MillCommand
-parseSubCommand subcommand = MillCommand <$> configDir <*> oneWordNet <*> subcommand
+parseSubCommand subcommand
+  = MillCommand
+  <$> configDir
+  <*> noCache
+  <*> oneWordNet
+  <*> subcommand
   where
     configDir = option (Just <$> str)
       (metavar "CONFIGDIR" <> short 'c' <> long "config-dir"
        <> help "Directory where configuration files are in"
        <> value Nothing)
+    noCache = switch (short 'n' <> long "no-cache"
+                      <> help "Ignore cache")
 
 parseCommand :: Parser MillCommand
 parseCommand = hsubparser $
@@ -105,30 +112,30 @@ main = do
     $ info (helper <*> parseCommand)
     (fullDesc <> progDesc millProgDesc <> header "mill")
   case commandToRun of
-    MillCommand configDir oneWN subcommand ->
+    MillCommand configDir noCache oneWN subcommand ->
       case subcommand of
-        Validate inputPath -> validate configDir oneWN inputPath
+        Validate inputPath -> validate configDir noCache oneWN inputPath
         Export format inputPath outputPath
-          -> export configDir oneWN format inputPath outputPath
+          -> export configDir noCache oneWN format inputPath outputPath
 
-getConfig :: ConfigDir -> OneWN -> FilePath -> IO Config
-getConfig configDir' oneWN wnPath' = do
+getConfig :: ConfigDir -> Bool -> OneWN -> FilePath -> IO Config
+getConfig configDir' noCache oneWN wnPath' = do
   wnPath    <- canonicalDir wnPath'
   configDir <- canonicalDir $ fromMaybe wnPath' configDir'
-  readConfig oneWN wnPath configDir
+  readConfig noCache oneWN wnPath configDir
 
-validate :: ConfigDir -> OneWN -> FilePath -> IO ()
-validate configDir oneWN inputPath = do
-  config <- getConfig configDir oneWN inputPath
+validate :: ConfigDir -> Bool -> OneWN -> FilePath -> IO ()
+validate configDir noCache oneWN inputPath = do
+  config <- getConfig configDir noCache oneWN inputPath
   isDirectory <- doesDirectoryExist inputPath
   runReaderT (if isDirectory
                then validateLexicographerFiles
                else validateLexicographerFile inputPath)
     config
 
-export :: ConfigDir -> OneWN -> ExportFormat -> FilePath -> FilePath -> IO ()
-export configDir oneWN format inputPath outputPath = do
-  config <- getConfig configDir oneWN inputPath
+export :: ConfigDir -> Bool -> OneWN -> ExportFormat -> FilePath -> FilePath -> IO ()
+export configDir noCache oneWN format inputPath outputPath = do
+  config <- getConfig configDir noCache oneWN inputPath
   case format of
     WNJSON -> exportJSON outputPath config
     WNDB -> exportWNDB outputPath config
@@ -137,7 +144,7 @@ exportJSON :: FilePath -> Config -> IO ()
 exportJSON outputFile = runReaderT $ lexicographerFilesJSON outputFile
 
 exportWNDB :: FilePath -> Config -> IO ()
-exportWNDB _outputDir config =
+exportWNDB outputDir config =
   case oneWN config of
         Nothing -> error "You must specify a language for WNDB export"
-        Just _ -> error "Not implemented yet" --runReaderT (toWNDB outputDir) config
+        Just _ -> runReaderT (toWNDB outputDir) config

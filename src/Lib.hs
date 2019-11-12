@@ -8,20 +8,16 @@ module Lib
    , validateLexicographerFiles
    , lexicographerFilesJSON
     , readConfig
---    , toWNDB
+   , toWNDB
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated, OneWN
             , Validation(..), SourceValidation, singleton
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
-            -- , showLongWNPOS, synsetPOS
-            , unsafeLookup
-            -- , validate
-            , validation )
-import Export ( -- DBSynset(..), calculateOffsets, makeIndexIndex, newline
-              -- , showDBSynset, showIndex,
-                synsetsToSynsetJSONs )
+            , showLongWNPOS, synsetPOS, unsafeLookup, validation )
+import Export ( DBSynset(..), calculateOffsets, wndbIndex, newline
+              , showDBSynset, showWNDBindex, synsetsToSynsetJSONs )
 import Parse (parseLexicographer)
 import Validate ( makeIndex, ValIndex, SynsetMap, mapSynsets, removeInterWNRelations
                 , validateSynsets )
@@ -34,8 +30,7 @@ import Data.Binary (encodeFile,decodeFileOrFail)
 import Data.ByteString.Builder (hPutBuilder)
 import Data.Coerce (coerce)
 import Data.Either (partitionEithers)
-import Data.List (intercalate, find--, intersperse
-                 )
+import Data.List (intercalate, find, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -47,11 +42,11 @@ import qualified Data.Text.IO as TIO
 import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 import qualified Data.Text.Read as TR
---import Data.Traversable (mapAccumL)
+import Data.Traversable (mapAccumL)
 import Development.Shake ( shake, ShakeOptions(..), shakeOptions
                          , need, want, (%>) )
 import Development.Shake.FilePath ((<.>), (-<.>), splitFileName, takeDirectory)
-import System.Directory ( canonicalizePath, doesDirectoryExist--, createDirectoryIfMissing
+import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryIfMissing
                         , doesDirectoryExist, doesPathExist, withCurrentDirectory )
 import System.FilePath ((</>), normalise, equalFilePath)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
@@ -77,6 +72,8 @@ data Config = Config
   -- | where the index gets written, etc. In a multilanguage setting,
   -- only the files in this directory get written to output formats
   , mainWNDir :: FilePath
+  -- | Ignore cache
+  , noCache :: Bool
   } deriving (Show,Eq)
 
 
@@ -105,8 +102,8 @@ canonicalDir filepath' = do
   return $ if isDirectory then filepath else takeDirectory filepath
   
 
-readConfig :: Maybe Text -> FilePath -> FilePath -> IO Config
-readConfig oneWN wnPath configurationDir = do
+readConfig :: Bool -> OneWN -> FilePath -> FilePath -> IO Config
+readConfig noCache oneWN wnPath configurationDir = do
   lexNamesInput              <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
   relationsInput             <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
   (wnNames, wnRelativePaths) <- unzip <$> readTSVwith (configurationDir </> "wns.tsv") wnsReader
@@ -119,6 +116,7 @@ readConfig oneWN wnPath configurationDir = do
   return $ Config { oneWN, lexnamesToId, textToCanonicNames
                   , canonicToDomain, textToLexRelations
                   , mainWNDir = wnPath, wnPaths
+                  , noCache
                   }
   where
     readTSVwith filePath reader = readTSV reader <$> TIO.readFile filePath
@@ -290,10 +288,10 @@ readCachedFileIndex oneWN lexFilePath = do
 -- cache
 build :: App ()
 build = do
-  config@Config{mainWNDir} <- ask
+  config@Config{mainWNDir, noCache} <- ask
   lexFiles <- wnLexFiles
   let shakeDir = mainWNDir </> ".cache"
-  liftIO . shake shakeOptions{ shakeFiles=shakeDir, shakeThreads=0 }
+  liftIO . shake shakeOptions{ shakeFiles=shakeDir, shakeThreads=0, shakeVersion = if noCache then "42" else "1" }
     $ do
     -- targets
     want . map (cachePath . snd) $ NE.toList lexFiles
@@ -319,28 +317,28 @@ build = do
        -- valid index has no duplicates, but may have invalid synsets
        liftIO $ encodeFile outFilePath validIndex
 
--- toWNDB :: FilePath -> App ()
--- toWNDB outputDir = do
---   Config{lexnamesToId, textToLexRelations} <- ask
---   _ <- liftIO $ createDirectoryIfMissing True outputDir
---   ioAction <- validation prettyPrintList (go textToLexRelations lexnamesToId) <$> getValidated
---   _  <- liftIO ioAction
---   return ()
---   where
---     go :: Map Text Text -> Map Text Int -> (ValIndex (Synset a), NonEmpty (Synset Validated)) -> IO ()
---     go relationsMap lexicographerMap (index, synsets) = do
---       mapM_ toData dbSynsetsByPOS
---       mapM_ toIndex [N,V,A,R] -- no S
---       where
---         synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
---         -- we need to calculate all offsets before writing the file
---         (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
---         indexIndex = makeIndexIndex index
---         write filename wnPos = TIO.writeFile (outputDir </> filename <.> T.unpack (showLongWNPOS wnPos))
---         makeOffsetMap currOffsetMap = calculateOffsets 0 currOffsetMap relationsMap lexicographerMap index
---         toData posDBsynsets@(x:|_) =
---           let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset offsetMap) posDBsynsets
---           in write "data" (pos x) output
---         toIndex wnPOS =
---           let output = mconcat . intersperse newline $ showIndex wnPOS relationsMap offsetMap index indexIndex
---           in write "index" wnPOS output
+toWNDB :: FilePath -> App ()
+toWNDB outputDir = do
+  Config{lexnamesToId, textToLexRelations} <- ask
+  _ <- liftIO $ createDirectoryIfMissing True outputDir
+  ioAction <- validation prettyPrintList (go textToLexRelations lexnamesToId) <$> getValidated
+  _  <- liftIO ioAction
+  return ()
+  where
+    go :: Map Text Text -> Map Text Int -> (SynsetMap Validated, ValIndex, NonEmpty (Synset Validated)) -> IO ()
+    go relationsMap lexicographerMap (synsetMap, index, synsets) = do
+      mapM_ toData dbSynsetsByPOS
+      mapM_ toIndex [N,V,A,R] -- no S
+      where
+        synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
+        -- we need to calculate all offsets before writing the file
+        (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
+        indexIndex = wndbIndex synsetMap
+        write filename wnPos = TIO.writeFile (outputDir </> filename <.> T.unpack (showLongWNPOS wnPos))
+        makeOffsetMap currOffsetMap = calculateOffsets 0 currOffsetMap relationsMap lexicographerMap index synsetMap
+        toData posDBsynsets@(x:|_) =
+          let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset offsetMap) posDBsynsets
+          in write "data" (pos x) output
+        toIndex wnPOS =
+          let output = mconcat . intersperse newline $ showWNDBindex wnPOS relationsMap offsetMap indexIndex synsetMap
+          in write "index" wnPOS output

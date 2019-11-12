@@ -67,9 +67,11 @@ showLongWNPOS R = "adv"
 showLongWNPOS A = "adj"
 showLongWNPOS S = "adj"
 
+type LexName = Text
+
 data LexicographerFileId
   = LexicographerFileId { pos     :: WNPOS
-                        , lexname :: Text
+                        , lexname :: LexName
                         , wnName  :: WNName
                         }
   deriving (Eq,Generic,Ord,Show)

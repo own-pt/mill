@@ -1,22 +1,12 @@
 {-# LANGUAGE FlexibleContexts #-}
-module Validate
-  ( validateSynsets
-  , ValIndex
-  , SynsetMap
-  , mapSynsets
-  , lookupIndex
-  , makeIndex
-  , removeInterWNRelations
-  , Index
-  , indexKey
-  , wordSenseKey
-  ) where
+module Validate where
 
-import Data (Synset(..), Unvalidated, Validated, SourceValidation, WNName
+import Data (Synset(..), Unvalidated, Validated, SourceValidation
             , WSense(..), WNid(..), Validation(..), WordSenseForm(..)
             , SynsetRelation(..),WordPointer(..), WNValidation, WNError(..), WNPOS(..)
-            , LexicographerFileId(..), Relation(..), WNObj(..), SourcePosition(..)
-            , WordSenseId(..),SourceError(..), WNExtra(..), OneWN, singleton,lexicographerFileIdToText)
+            , LexicographerFileId(..), Relation(..), WNObj(..), LexName, WNName
+            , WordSenseId(..),SourceError(..), WNExtra(..), OneWN, SourcePosition(..)
+            , singleton, lexicographerFileIdToText, unsafeLookup)
 
 import Data.Bifunctor (bimap)
 import Data.Coerce (coerce)
@@ -26,7 +16,6 @@ import qualified Data.List.NonEmpty as NE
 import Data.Maybe (catMaybes)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
 import Data.ListTrie.Patricia.Map (TrieMap,fromListWith'
@@ -38,8 +27,7 @@ import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
-type Index a     = TrieMap WrappedIntMap Char (Either String a)
-type SynsetKey = (WNName, WNPOS, Text, Int)
+type SynsetKey = (WNName, WNPOS, LexName, Int)
 type SynsetMap a = Map SynsetKey (Synset a)
 type ValIndex = TrieMap WrappedIntMap Char (NonEmpty SynsetKey)
 
@@ -276,3 +264,17 @@ lookupIndex key index synsetMap =
   case lookup key index of
     Just synsetKeys -> catMaybes . NE.toList $ NE.map (`M.lookup` synsetMap) synsetKeys
     Nothing -> []
+
+lookupSynset :: SynsetMap a -> SynsetKey -> Synset a
+lookupSynset synsetMap synsetID =
+  unsafeLookup ("No synset correponding to " ++ show synsetID) synsetID synsetMap
+
+lookupSense :: WordSenseId -> ValIndex -> SynsetMap a -> Synset a
+lookupSense (WordSenseId senseId) index synsetMap =
+  case filter hasSense candidates of
+    [synset] -> synset
+    _ -> error $ "Error trying to find synset of " ++ show senseId
+  where
+    candidates = lookupIndex (indexKey senseId) index synsetMap
+    hasSense Synset{wordSenses} =
+      any (\(WSense (WordSenseId otherSenseId) _ _) -> otherSenseId == senseId) wordSenses
