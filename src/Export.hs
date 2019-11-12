@@ -88,7 +88,7 @@ data DBSynset = DBSynset
   , relations            :: [(Text, SynsetId, WNPOS, (Int, Int))]
   } deriving (Show,Eq)
 
-synsetToDB :: Map Text Text -> Map Text Int -> ValIndex -> SynsetMap a -> Synset Validated -> DBSynset
+synsetToDB :: Map Text Text -> Map Text Int -> ValIndex -> SynsetMap Validated -> Synset Validated -> DBSynset
 synsetToDB relationsMap lexicographerMap index synsetMap
   Synset{lexicographerFileId, wordSenses = senses@(WSense (WordSenseId headId@WNid{pos}) _ _:|_), sourcePosition, definition, examples, extra, relations} =
   DBSynset { _id = SynsetId headId
@@ -132,8 +132,8 @@ synsetToDB relationsMap lexicographerMap index synsetMap
         targetSynset = lookupSense (WordSenseId wnId) index synsetMap
         getWordSenseIndex targetSenseId Synset{wordSenses} =
           fromMaybe
-          (error $ "No wordsense corresponding to word sense " ++ show targetSenseId)
-          . findIndex (\(WSense (WordSenseId synsetWnId) _ _) -> synsetWnId == targetSenseId)
+          (error $ "No wordsense corresponding to word sense " ++ show targetSenseId ++ " among " ++ show wordSenses)
+          . findIndex (\(WSense (WordSenseId senseId) _ _) -> senseId == targetSenseId)
           $ NE.toList wordSenses
 
 padText :: Int -> Text -> Text
@@ -184,7 +184,7 @@ showDBSynset offsetMap DBSynset{ _id, lexicographerFileNum, pos, wordSenses, fra
 newline :: Text
 newline = "\n"
 
-calculateOffsets :: Int -> Map String Int -> Map Text Text -> Map Text Int -> ValIndex -> SynsetMap a -> NonEmpty (Synset Validated)
+calculateOffsets :: Int -> Map String Int -> Map Text Text -> Map Text Int -> ValIndex -> SynsetMap Validated -> NonEmpty (Synset Validated)
   -> (Map String Int, NonEmpty DBSynset)
 calculateOffsets startOffset startOffsetMap relationsMap lexicographerMap index synsetMap synsets
   = (\((offsetMap, _), dbSynsets) -> (offsetMap, dbSynsets)) $ mapAccumL go (startOffsetMap, startOffset) synsets

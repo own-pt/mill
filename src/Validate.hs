@@ -170,48 +170,14 @@ checkRelationsTargets :: ValIndex -> SynsetMap Unvalidated -> WNObj -> [Relation
   -> WNValidation [Relation]
 checkRelationsTargets index synsetMap wnObj = traverse checkRelation
   where
-    checkRelation relation@(Relation _ wnid@WNid{lexForm = targetLexForm, idRel}) =
-      checkCandidates maybeCandidates idRel
+    checkRelation relation@(Relation _ wnid) =
+      case lookupSenseCandidates wnid index synsetMap of
+        [] -> missingRelationError
+        [_] -> Success relation
+        (x:candidates) -> ambiguityError (x:|candidates)
       where
-        maybeCandidates = lookupIndex targetSenseKey index synsetMap
-        targetSenseKey = indexKey wnid
         ambiguityError = Failure . singleton . AmbiguousRelationTarget wnObj relation
         missingRelationError = Failure . singleton $ MissingRelationTarget wnObj relation
-        checkCandidates []  _ = missingRelationError
-        checkCandidates [_] Nothing = Success relation
-        checkCandidates (x:candidates) Nothing = ambiguityError (x:|candidates)
-        checkCandidates candidates (Just ("syn", synonymLexForm))
-        -- [] unhardcode this name; either parse to graph already
-        -- (probs best option) or add synonym relations
-          = case filter isTarget candidates of
-              [] -> missingRelationError
-              [_] -> Success relation
-              x:xs -> ambiguityError $ x:|xs
-          where
-            isTarget Synset{wordSenses}
-              = any targetWord wordSenses
-              where
-                targetWord (WSense (WordSenseId WNid{lexForm}) _ _)
-                  = lexForm == synonymLexForm
-        checkCandidates candidates (Just (relName, idRelTargetLexForm))
-          = case filter isTarget candidates of
-              [] -> missingRelationError
-              [_] -> Success relation
-              x:xs -> ambiguityError $ x:|xs
-          where
-            isTarget Synset{relations, wordSenses}
-              = any (relationIsTarget . coerce) relations
-              || any (relationIsTarget . coerce) (concatMap pointers targetSenses)
-              where
-                relationIsTarget (Relation name WNid{lexForm})
-                  = name == relName && lexForm == idRelTargetLexForm
-                targetWord (WSense (WordSenseId WNid{lexForm}) _ _)
-                  = lexForm == targetLexForm
-                targetSenses -- actually there should only be one; if
-                             -- there's more validation will catch it
-                  = NE.filter targetWord wordSenses
-
-
 
 checkExtra :: WNPOS -> WNExtra -> WNValidation WNExtra
 checkExtra _ WNEmpty = Success WNEmpty
@@ -269,12 +235,39 @@ lookupSynset :: SynsetMap a -> SynsetKey -> Synset a
 lookupSynset synsetMap synsetID =
   unsafeLookup ("No synset correponding to " ++ show synsetID) synsetID synsetMap
 
-lookupSense :: WordSenseId -> ValIndex -> SynsetMap a -> Synset a
-lookupSense (WordSenseId senseId) index synsetMap =
-  case filter hasSense candidates of
-    [synset] -> synset
-    _ -> error $ "Error trying to find synset of " ++ show senseId
+lookupSenseCandidates :: WNid -> ValIndex -> SynsetMap a -> [Synset a]
+lookupSenseCandidates senseId@WNid{idRel, lexForm} index synsetMap =
+  findTarget idRel
   where
     candidates = lookupIndex (indexKey senseId) index synsetMap
-    hasSense Synset{wordSenses} =
-      any (\(WSense (WordSenseId otherSenseId) _ _) -> otherSenseId == senseId) wordSenses
+    findTarget (Just ("syn", synonymLexForm)) =
+      -- [] unhardcode this name; either parse to graph already
+      -- (probs best option) or add synonym relations
+      filter isTarget candidates
+      where
+        isTarget Synset{wordSenses}
+          = any targetWord wordSenses
+          where
+            targetWord (WSense (WordSenseId WNid{lexForm = otherLexForm}) _ _)
+              = otherLexForm == synonymLexForm
+    findTarget (Just (relName, idRelTargetLexForm))
+      = filter isTarget candidates
+      where
+        isTarget Synset{relations, wordSenses}
+          = any (relationIsTarget . coerce) relations
+          || any (relationIsTarget . coerce) (concatMap pointers targetSenses)
+          where
+            relationIsTarget (Relation name WNid{lexForm = otherLexForm})
+              = name == relName && otherLexForm == idRelTargetLexForm
+            targetWord (WSense (WordSenseId WNid{lexForm = otherLexForm}) _ _)
+              = lexForm == otherLexForm
+            targetSenses -- actually there should only be one; if
+                         -- there's more validation will catch it
+              = NE.filter targetWord wordSenses
+    findTarget _ = candidates
+
+lookupSense :: WordSenseId -> ValIndex -> SynsetMap Validated -> Synset Validated
+lookupSense (WordSenseId senseId) index synsetMap =
+  case lookupSenseCandidates senseId index synsetMap of
+    [synset] -> synset
+    _ -> error $ "Error trying to find synset of " ++ show senseId
