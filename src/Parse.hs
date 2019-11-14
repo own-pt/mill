@@ -1,8 +1,8 @@
 module Parse (parseLexicographer) where
 
 import Data ( Synset(..), LexicographerFileId(..), WNPOS, WNObj(..), SourceValidation
-            , Validation(..), Unvalidated, SynsetRelation(..), WSense(..), WordSenseId(..)
-            , WordPointer(..), IdRelation, WordSenseForm(..), SourceError(..), Relation(..)
+            , Validation(..), Unvalidated, SynsetRelation(..), WSense(..)
+            , WordPointer(..), IdRelation, LexicalForm(..), SourceError(..), Relation(..)
             , SourcePosition(..), WNError(..), WNExtra(..), FrameId, RelationName
             , readLongWNPOS, toWNid)
 
@@ -198,20 +198,17 @@ wordSenseStatement :: Parser WSense
 wordSenseStatement = statement "w" go
   where
     go = WSense
-      <$> wordSenseIdentifier
+      <$> (LexicalForm <$> senseWord)
       <*> (wordSenseFrames <|> wordSenseMarker <|> emptyExtra)
       <*> wordSensePointers
     wordSenseFrames = fmap WNVerb $ symbol "fs" *> frameNumbers
     wordSenseMarker = fmap WNAdj $ symbol "marker" *> token
 
-wordSenseIdentifier :: Parser WordSenseId
-wordSenseIdentifier = WordSenseId . toWNid <$> identifier
-
-identifier :: Parser (LexicographerFileId, WordSenseForm, IdRelation)
+identifier :: Parser (LexicographerFileId, LexicalForm, IdRelation)
 identifier =
   (,,)
   <$> (try lexicographerIdentifier <|> reader fst3)
-  <*> fmap WordSenseForm senseWord <*> optional identifyingRelation
+  <*> fmap LexicalForm senseWord <*> optional identifyingRelation
   where
     lexicographerIdentifier = do
       wnName <- wnNameR
@@ -219,7 +216,7 @@ identifier =
     identifyingRelation =
       (,)
       <$> (symbol "(" *> senseWord)
-      <*> (fmap WordSenseForm . lexeme $ takeWhile1P Nothing (\c -> not $ isSpace c || c == ')') <* symbol ")")
+      <*> (fmap LexicalForm . lexeme $ takeWhile1P Nothing (\c -> not $ isSpace c || c == ')') <* symbol ")")
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go

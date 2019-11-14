@@ -17,7 +17,7 @@ import Data ( Synset(..), Unvalidated, Validated, OneWN
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
             , showLongWNPOS, synsetPOS, unsafeLookup, validation )
 import Export ( DBSynset(..), calculateOffsets, wndbIndex, newline
-              , showDBSynset, showWNDBindex, synsetsToSynsetJSONs )
+              , showDBSynset, showWNDBindex, synsetsToSynsetJSONs, wndbSenseIndex )
 import Parse (parseLexicographer)
 import Validate ( makeIndex, ValIndex, SynsetMap, mapSynsets, removeInterWNRelations
                 , validateSynsets )
@@ -25,7 +25,6 @@ import Validate ( makeIndex, ValIndex, SynsetMap, mapSynsets, removeInterWNRelat
 --import Debug.Trace (trace)
 import Control.Monad (unless,mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
---import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (encodeFile,decodeFileOrFail)
 import Data.ByteString.Builder (hPutBuilder)
 import Data.Coerce (coerce)
@@ -186,9 +185,10 @@ lexicographerFilesJSON outputFile = do
   result <- getValidated
   case result of
     Failure errors -> liftIO $ prettyPrintList errors
-    Success (_, _, synsets) -> let jsonBuilder = synsetsToSynsetJSONs textToCanonicNames lexnamesToId synsets
-                               in liftIO
-                               $ withFile outputFile WriteMode (`write` jsonBuilder) 
+    Success (synsetMap, valIndex, synsets) ->
+      let jsonBuilder = synsetsToSynsetJSONs valIndex synsetMap textToCanonicNames lexnamesToId synsets
+      in liftIO
+         $ withFile outputFile WriteMode (`write` jsonBuilder) 
   where
     write handle builder = do
       _ <- handle `hSetBinaryMode` True
@@ -329,16 +329,20 @@ toWNDB outputDir = do
     go relationsMap lexicographerMap (synsetMap, index, synsets) = do
       mapM_ toData dbSynsetsByPOS
       mapM_ toIndex [N,V,A,R] -- no S
+      senseIndex
       where
         synsetsByPOS = NE.groupWith1 (showLongWNPOS . synsetPOS) synsets
         -- we need to calculate all offsets before writing the file
         (offsetMap, dbSynsetsByPOS) = mapAccumL makeOffsetMap M.empty synsetsByPOS
-        indexIndex = wndbIndex synsetMap
+        wNDBindex = wndbIndex synsetMap
         write filename wnPos = TIO.writeFile (outputDir </> filename <.> T.unpack (showLongWNPOS wnPos))
         makeOffsetMap currOffsetMap = calculateOffsets 0 currOffsetMap relationsMap lexicographerMap index synsetMap
         toData posDBsynsets@(x:|_) =
           let output = mconcat . NE.toList . NE.intersperse newline $ NE.map (showDBSynset offsetMap) posDBsynsets
           in write "data" (pos x) output
         toIndex wnPOS =
-          let output = mconcat . intersperse newline $ showWNDBindex wnPOS relationsMap offsetMap indexIndex synsetMap
+          let output = mconcat . intersperse newline $ showWNDBindex wnPOS relationsMap offsetMap wNDBindex synsetMap
           in write "index" wnPOS output
+        senseIndex =
+          let output = mconcat . intersperse newline $ wndbSenseIndex lexicographerMap index synsetMap wNDBindex offsetMap
+          in TIO.writeFile (outputDir </> "index.sense") output

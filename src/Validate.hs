@@ -1,12 +1,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Validate where
 
-import Data (Synset(..), Unvalidated, Validated, SourceValidation
-            , WSense(..), WNid(..), Validation(..), WordSenseForm(..)
+import Data (Synset(..), Unvalidated, Validated, SourceValidation, SynsetKey
+            , WSense(..), WNid(..), Validation(..), LexicalForm(..)
             , SynsetRelation(..),WordPointer(..), WNValidation, WNError(..), WNPOS(..)
             , LexicographerFileId(..), Relation(..), WNObj(..), LexName, WNName
-            , WordSenseId(..),SourceError(..), WNExtra(..), OneWN, SourcePosition(..)
-            , singleton, lexicographerFileIdToText, unsafeLookup)
+            ,SourceError(..), WNExtra(..), OneWN
+            , singleton, lexicographerFileIdToText, synsetKey, unsafeLookup)
 
 import Data.Bifunctor (bimap)
 import Data.Coerce (coerce)
@@ -27,7 +27,6 @@ import Prelude hiding (lookup)
 
 -- when to change LexicographerFile : Text to LexicographerFileId :
 -- Int in wordsenses etc.? is changing it really necessary?
-type SynsetKey = (WNName, WNPOS, LexName, Int)
 type SynsetMap a = Map SynsetKey (Synset a)
 type ValIndex = TrieMap WrappedIntMap Char (NonEmpty SynsetKey)
 
@@ -35,25 +34,23 @@ makeIndex :: NonEmpty (Synset Unvalidated) -> (SynsetMap Unvalidated, ValIndex)
 makeIndex synsets = (synsetMap, fromListWith' (<>) keyValuePairs)
   where
     keyValuePairs = concatMap synsetPairs synsets
-    synsetPairs synset@Synset{wordSenses} =
+    synsetPairs synset@Synset{wordSenses, lexicographerFileId} =
       NE.toList $
-      NE.map ((, singleton $ synsetKey synset) . wordSenseKey)
+      NE.map ((, singleton $ synsetKey synset) . wordSenseKey lexicographerFileId)
       wordSenses
     synsetMap = M.fromList . NE.toList $ NE.zip (NE.map synsetKey synsets) synsets
-    synsetKey Synset{sourcePosition = SourcePosition (beg, _), lexicographerFileId = LexicographerFileId{lexname, pos, wnName}}
-      = (wnName, pos, lexname, beg)
 
-wordSenseKey :: WSense -> String
-wordSenseKey (WSense wnWordId _ _)
-  = indexKey $ coerce wnWordId
+wordSenseKey :: LexicographerFileId -> WSense -> String
+wordSenseKey LexicographerFileId{pos, lexname, wnName} WSense{lexicalForm}
+  = indexKey wnName pos lexname lexicalForm
 
-indexKey :: WNid -> String
+indexKey :: WNName -> WNPOS -> LexName -> LexicalForm -> String
 -- this is NOT the sensekey
-indexKey WNid{wnName, pos, lexname, lexForm = WordSenseForm wordForm} =
+indexKey wnName pos lexname (LexicalForm lexForm) =
   -- if changing this definition change WNDB export too
   intercalate "\t" [ T.unpack wnName
                    , show pos ++ T.unpack lexname
-                   , T.unpack wordForm
+                   , T.unpack lexForm
                    ]
 
 
@@ -73,7 +70,7 @@ checkSynset index synsetMap
       <$> Success comments
       <*> Success sourcePosition
       <*> Success lexicographerFileId
-      <*> checkWordSenses index synsetMap wordSenses
+      <*> checkWordSenses index synsetMap  synsetPOS wordSenses
       <*> Success definition
       <*> checkSortNoDuplicates UnsortedExamples DuplicateExamples examples
       <*> checkSynsetRelations index synsetMap relations
@@ -137,24 +134,23 @@ checkSortNoDuplicates toSortError toDuplicateError = sortedCheckNoDuplicates . v
     sortedCheckNoDuplicates (Success xs)
       = bimap (singleton . toDuplicateError) id $ validateNoDuplicates xs
 
-checkWordSenses :: ValIndex -> SynsetMap Unvalidated -> NonEmpty WSense -> WNValidation (NonEmpty WSense)
-checkWordSenses index synsetMap wordSenses
+checkWordSenses :: ValIndex -> SynsetMap Unvalidated -> WNPOS -> NonEmpty WSense -> WNValidation (NonEmpty WSense)
+checkWordSenses index synsetMap pos wordSenses
   =  checkWordSensesOrderNoDuplicates
-  *> traverse (checkWordSense index synsetMap) wordSenses
+  *> traverse (checkWordSense index synsetMap pos) wordSenses
   *> Success wordSenses
   where
     checkWordSensesOrderNoDuplicates
       = checkSortNoDuplicates UnsortedWordSenses DuplicateSynsetWords . map wordSenseLexicalForm $ NE.toList wordSenses
-    wordSenseLexicalForm (WSense (WordSenseId WNid{lexForm}) _ _) = lexForm
+    wordSenseLexicalForm WSense{lexicalForm} = lexicalForm
 
-checkWordSense :: ValIndex -> SynsetMap Unvalidated -> WSense -> WNValidation WSense
-checkWordSense index synsetMap wordSense@(WSense wID extra wordPointers)
+checkWordSense :: ValIndex -> SynsetMap Unvalidated -> WNPOS -> WSense -> WNValidation WSense
+checkWordSense index synsetMap wordPOS wordSense@(WSense _ extra wordPointers)
   =  checkWordSensePointersOrderNoDuplicates
   *> checkWordSensePointersTargets index synsetMap wordPointers
   *> checkExtra wordPOS extra
   *> Success wordSense
   where
-    wordPOS = pos (coerce wID :: WNid)
     checkWordSensePointersOrderNoDuplicates =
       checkSortNoDuplicates UnsortedWordPointers DuplicateWordRelation wordPointers
 
@@ -236,10 +232,11 @@ lookupSynset synsetMap synsetID =
   unsafeLookup ("No synset correponding to " ++ show synsetID) synsetID synsetMap
 
 lookupSenseCandidates :: WNid -> ValIndex -> SynsetMap a -> [Synset a]
-lookupSenseCandidates senseId@WNid{idRel, lexForm} index synsetMap =
+-- | find synsets corresponding to human-readable id, if any
+lookupSenseCandidates WNid{wnName, pos, lexname, lexForm, idRel} index synsetMap =
   findTarget idRel
   where
-    candidates = lookupIndex (indexKey senseId) index synsetMap
+    candidates = lookupIndex (indexKey wnName pos lexname lexForm) index synsetMap
     findTarget (Just ("syn", synonymLexForm)) =
       -- [] unhardcode this name; either parse to graph already
       -- (probs best option) or add synonym relations
@@ -248,7 +245,7 @@ lookupSenseCandidates senseId@WNid{idRel, lexForm} index synsetMap =
         isTarget Synset{wordSenses}
           = any targetWord wordSenses
           where
-            targetWord (WSense (WordSenseId WNid{lexForm = otherLexForm}) _ _)
+            targetWord WSense{lexicalForm = otherLexForm}
               = otherLexForm == synonymLexForm
     findTarget (Just (relName, idRelTargetLexForm))
       = filter isTarget candidates
@@ -259,15 +256,17 @@ lookupSenseCandidates senseId@WNid{idRel, lexForm} index synsetMap =
           where
             relationIsTarget (Relation name WNid{lexForm = otherLexForm})
               = name == relName && otherLexForm == idRelTargetLexForm
-            targetWord (WSense (WordSenseId WNid{lexForm = otherLexForm}) _ _)
+            targetWord WSense{lexicalForm = otherLexForm}
               = lexForm == otherLexForm
             targetSenses -- actually there should only be one; if
                          -- there's more validation will catch it
               = NE.filter targetWord wordSenses
     findTarget _ = candidates
 
-lookupSense :: WordSenseId -> ValIndex -> SynsetMap Validated -> Synset Validated
-lookupSense (WordSenseId senseId) index synsetMap =
-  case lookupSenseCandidates senseId index synsetMap of
+findSynset :: WNid -> ValIndex -> SynsetMap Validated -> Synset Validated
+-- | find synset corresponding to human-readable id; after validation,
+-- there should be exactly one
+findSynset wnID index synsetMap =
+  case lookupSenseCandidates wnID index synsetMap of
     [synset] -> synset
-    _ -> error $ "Error trying to find synset of " ++ show senseId
+    _ -> error $ "Error trying to find synset of " ++ show wnID

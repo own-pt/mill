@@ -10,6 +10,7 @@ module Data where
 import Data.Aeson ( ToJSON(..) )
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (Binary)
+import Data.CaseInsensitive ( foldCase )
 import Data.Coerce (coerce)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
@@ -21,6 +22,7 @@ import qualified Data.Text as T
 import Data.Text.Prettyprint.Doc ( Pretty(..),Doc,dot,colon,(<+>), nest, encloseSep
                                  , line, indent, align, vsep, squotes)
 import GHC.Generics (Generic)
+import Text.Printf (printf)
 
 
 singleton :: a -> NonEmpty a
@@ -94,23 +96,29 @@ lexicographerFileIdToText LexicographerFileId{pos, lexname} =
     posText S = "adjs"
     posText R = "adv"
 
-newtype WordSenseForm = WordSenseForm Text
+newtype LexicalForm = LexicalForm Text
   deriving (Eq,Ord,Generic,Show)
   deriving newtype (Binary,Pretty,ToJSON)
 
 tshow :: Show a => a -> Text
 tshow = T.pack . show
 
-type IdRelation = Maybe (RelationName, WordSenseForm)
+type IdRelation = Maybe (RelationName, LexicalForm)
 
 type WNName = Text
 type OneWN = Maybe WNName
 
+type SynsetKey = (WNName, WNPOS, LexName, Int)
+
+synsetKey :: Synset a -> SynsetKey
+synsetKey Synset{sourcePosition = SourcePosition (beg, _), lexicographerFileId = LexicographerFileId{lexname, pos, wnName}}
+  = (wnName, pos, lexname, beg)
+
 data WNid =
   WNid { pos     :: WNPOS
-       , lexname :: Text
+       , lexname :: LexName
        , wnName  :: WNName
-       , lexForm :: WordSenseForm
+       , lexForm :: LexicalForm
        , idRel   :: IdRelation
        }
   deriving (Eq,Generic,Ord,Show)
@@ -128,7 +136,7 @@ instance ToJSON WNid where
     = toJSON (wnName, pos, lexname, lexForm, idRel)
 
 
-toWNid :: (LexicographerFileId, WordSenseForm, IdRelation) -> WNid
+toWNid :: (LexicographerFileId, LexicalForm, IdRelation) -> WNid
 toWNid (LexicographerFileId{pos,wnName,lexname}, lexForm, idRel) = WNid{pos,wnName,lexname,lexForm,idRel}
 
 idLexFile :: WNid -> LexicographerFileId
@@ -140,7 +148,7 @@ newtype WordSenseId =
   deriving anyclass (Binary,ToJSON)
   deriving newtype (Pretty)
 
-makeWordSenseId :: LexicographerFileId -> WordSenseForm -> IdRelation
+makeWordSenseId :: LexicographerFileId -> LexicalForm -> IdRelation
   -> WordSenseId
 makeWordSenseId LexicographerFileId{pos,lexname,wnName} lexForm idRel =
   WordSenseId WNid{pos,lexname,wnName,lexForm,idRel}
@@ -165,25 +173,24 @@ newtype SynsetRelation = SynsetRelation Relation
 
 type FrameId = Int
 data WSense = WSense
-  { wid      :: WordSenseId
-  , extra    :: WNExtra
-  , pointers :: [WordPointer]
+  { lexicalForm :: LexicalForm
+  , extra       :: WNExtra
+  , pointers    :: [WordPointer]
   }
   deriving (Binary,Eq,Generic,Ord,Show)
 
--- senseKey :: Int -> Int -> Maybe SynsetRelation -> WSense -> String
--- senseKey lexFileNum synsetTypeNum maybeHeadRelation
---   wordSense@(WSense (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = IdRelation lexicalId}) _ _)
---   = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum lexicalId headWordForm (headWordIdRelation :: String)
---   where
---     lemma = T.toLower wordForm
---     (headWordForm, headWordIdRelation) =
---       case (synsetTypeNum, maybeHeadRelation) of
---         (5, Just (SynsetRelation _
---                   (SynsetId WNid{lexForm = WordSenseForm headForm,lexId = IdRelation headIdRelation})))
---           -> (T.toLower headForm, printf "%02d" headIdRelation)
---         (5,Nothing) -> error $ "No head synset found for " ++ show wordSense
---         _           -> ("", "")
+senseKey :: Int -> Int -> Int -> Maybe (LexicalForm, Int) -> WSense -> String
+senseKey lexFileNum synsetTypeNum lexicalId maybeHead
+  wordSense@WSense{lexicalForm = LexicalForm wordForm}
+  = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum lexicalId headWordForm (headWordIdRelation :: String)
+  where
+    lemma = foldCase wordForm
+    (headWordForm, headWordIdRelation) =
+      case (synsetTypeNum, maybeHead) of
+        (5, Just (headForm, headLexId))
+          -> (T.toLower $ coerce headForm, printf "%02d" headLexId)
+        (5,Nothing) -> error $ "No head synset found for " ++ show wordSense
+        _           -> ("", "")
 
 
 newtype SourcePosition = SourcePosition (Int, Int)
@@ -221,10 +228,6 @@ instance Ord (Synset Validated) where
 
 synsetPOS :: Synset a -> WNPOS
 synsetPOS Synset{lexicographerFileId = LexicographerFileId{pos}} = pos
-
-synsetId :: Synset a -> SynsetId
-synsetId Synset{wordSenses = WSense wordSenseId _ _:|_}
-  = coerce wordSenseId
 
 ---- validation
 data Validation e a = Failure e | Success a deriving (Binary,Eq,Generic,Show)
@@ -269,7 +272,7 @@ data WNError
   | DuplicateWordSense String
   | DuplicateExamples (NonEmpty Text)
   | DuplicateFrames (NonEmpty FrameId)
-  | DuplicateSynsetWords (NonEmpty WordSenseForm)
+  | DuplicateSynsetWords (NonEmpty LexicalForm)
   | DuplicateWordRelation (NonEmpty WordPointer)
   | DuplicateSynsetRelation (NonEmpty SynsetRelation)
   | MissingRelationTarget WNObj Relation
@@ -277,7 +280,7 @@ data WNError
   | UnsortedExamples (NonEmpty (NonEmpty Text))
   | UnsortedFrames (NonEmpty (NonEmpty FrameId))
   | UnsortedSynsets (NonEmpty (NonEmpty (Synset Validated)))
-  | UnsortedWordSenses (NonEmpty (NonEmpty WordSenseForm))
+  | UnsortedWordSenses (NonEmpty (NonEmpty LexicalForm))
   | UnsortedSynsetRelations  (NonEmpty (NonEmpty SynsetRelation))
   | UnsortedWordPointers (NonEmpty (NonEmpty WordPointer))
   | FramesNonVerb
@@ -314,8 +317,8 @@ instance Pretty Relation where
     = pretty relationName <> "»" <> pretty wnId
 
 instance Pretty WSense where
-  pretty (WSense (WordSenseId wnId) _ _)
-    = pretty wnId
+  pretty (WSense (LexicalForm lexForm) _ _)
+    = pretty lexForm
 
 instance Pretty (Synset a) where
   pretty Synset{wordSenses = wordSense:|_} = pretty wordSense
