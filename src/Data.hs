@@ -188,7 +188,7 @@ senseKey lexFileNum synsetTypeNum lexicalId maybeHead
     (headWordForm, headWordIdRelation) =
       case (synsetTypeNum, maybeHead) of
         (5, Just (headForm, headLexId))
-          -> (T.toLower $ coerce headForm, printf "%02d" headLexId)
+          -> (T.unpack . foldCase $ coerce headForm, printf "%02d" headLexId)
         (5,Nothing) -> error $ "No head synset found for " ++ show wordSense
         _           -> ("", "")
 
