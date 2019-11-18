@@ -65,6 +65,9 @@ synsetToJSON index synsetMap idRelsMap textToCanonicNames _
     ++ idRels (idRelsMap M.!? synsetK)
     ++
     [ "id"         .= senseIdText headLexForm synsetK
+    , "lexicographerFile" .= lexicographerFile
+    , "wn" .= synsetWN
+    , "pos" .= synsetPOS
     , "wordsenses" .= NE.map toWordSense wordSenses
     , "definition" .= definition
     , "examples"   .= examples
@@ -73,7 +76,7 @@ synsetToJSON index synsetMap idRelsMap textToCanonicNames _
     , "_comments"   .= comments
     ]
   where
-    synsetK = synsetKey synset
+    synsetK@(synsetWN,synsetPOS,lexicographerFile,_) = synsetKey synset
     idRels Nothing = []
     idRels (Just xs) = [ "_references" .= map toIdRel (S.toList xs) ]
     toIdRel (name, targetLexForm) = (lookupRelName name, targetLexForm)
