@@ -183,7 +183,9 @@ WN_ID_RELATION = WN30['idRelation']
 WN_ID_TARGET = WN30['idTarget']
 WN_ID_WORDSENSE = WN30['idWordSense']
 WN_TEMP_ID = WN30['tempId']
-WN_IN_SYNSET = WN30["inSynset"]
+WN_SYNONYM_OF = WN30["synonymOf"]
+WN_SENSEKEY = WN30[SENSEKEY]
+WN_SYNSET_ID = WN30["synsetId"]
 
 PREFERENTIAL_RELATION_MAP = {
     WN_SIMILAR_TO  : True,
@@ -252,7 +254,7 @@ def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
         assert lexical_id_sense
         graph.set((word_sense, WN_TEMP_ID, lexical_id_sense))
         if not is_clash(WN_TEMP_ID, lexical_id_sense):
-            return (WN_TEMP_ID, lexical_id_form)
+            return (WN_TEMP_ID, lexical_id_sense)
         else:
             assert False, word_sense
     #
@@ -263,7 +265,7 @@ def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
                 if other_lexical_form == sibling_lexical_form:
                     # clash
                     return None
-        return (WN_IN_SYNSET, sibling_lexical_form)
+        return (WN_SYNONYM_OF, sibling_lexical_form)
     def find_id_relation():
         if clashes:
             # try distinguishing by sibling senses
@@ -308,6 +310,29 @@ def pick_wn_ids(graph):
     for lex_file in lex_files:
         for synset in graph.subjects(WN_LEXICOGRAPHER_FILE, lex_file):
             pick_synset_ids(graph, lex_file, synset)
+    return None
+
+def print_id_map(graph, output_file):
+    with open(output_file, 'w+') as output_stream:
+        for synset, lexicographer_file in graph.subject_objects(WN_LEXICOGRAPHER_FILE):
+            synset_id = graph.value(synset, WN_SYNSET_ID)
+            #assert synset_id, synset
+            for sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
+                sense_key = graph.value(sense, WN_SENSEKEY)
+                assert sense_key, sense
+                sense_lexical_form = graph.value(sense, WN_LEXICAL_FORM)
+                assert sense_lexical_form, sense
+                sense_id_relation = graph.value(sense, WN_ID_RELATION)
+                if sense_id_relation:
+                    _, sense_id_relation = r.namespace.split_uri(sense_id_relation)
+                sense_id_target_synset = graph.value(sense, WN_ID_TARGET)
+                sense_id_target_sense = graph.value(sense_id_target_synset, WN_ID_WORDSENSE)
+                sense_id_target_lexical_form = graph.value(sense_id_target_sense, WN_LEXICAL_FORM)
+                assert sense_id_relation and sense_id_target_lexical_form if sense_id_relation or sense_id_target_lexical_form else True, sense
+                print(sense_key, synset_id, lexicographer_file, sense_lexical_form,
+                      sense_id_relation, sense_id_target_lexical_form,
+                      sep='\t', file=output_stream)
+    return None
 
 ###
 
