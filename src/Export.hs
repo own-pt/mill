@@ -69,13 +69,13 @@ synsetToJSON index synsetMap idRelsMap textToCanonicNames _
     , "definition" .= definition
     , "examples"   .= examples
     , "relations"  .= map (toRelation . coerce) relations
-    , "position"   .= sourcePosition
-    , "comments"   .= comments
+    , "_position"   .= sourcePosition
+    , "_comments"   .= comments
     ]
   where
     synsetK = synsetKey synset
     idRels Nothing = []
-    idRels (Just xs) = [ "references" .= map toIdRel xs ]
+    idRels (Just xs) = [ "_references" .= map toIdRel xs ]
     toIdRel (name, targetLexForm) = (lookupRelName name, targetLexForm)
     senseIdText lexicalForm (wnName, wnPOS, lexname, offset) =
       T.intercalate "-" [wnName, showLongWNPOS wnPOS, lexname, coerce lexicalForm
@@ -84,9 +84,10 @@ synsetToJSON index synsetMap idRelsMap textToCanonicNames _
     synsetFrames _ = []
     toRelation (Relation name wnid@WNid{lexForm, idRel}) =
       object
-      $ maybe [] (\x -> ["reference" .= toIdRel x]) idRel
+      $ maybe [] (\x -> ["_reference" .= toIdRel x]) idRel
       ++ ["name" .= lookupRelName name
-         , "id" .= senseIdText lexForm targetSynsetKey]
+         , "id" .= senseIdText lexForm targetSynsetKey
+         , "_targetLexicalForm" .= lexForm]
       where
         targetSynsetKey = synsetKey $ findSynset wnid index synsetMap
     lookupRelName name = unsafeLookup missingRelation name textToCanonicNames
