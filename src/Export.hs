@@ -40,7 +40,7 @@ uncurry3 :: (a -> b -> c -> d) -> (a,b,c) -> d
 uncurry3 f (a,b,c) = f a b c
 
 identifyingRelations :: ValIndex -> SynsetMap Validated
-  -> Map SynsetKey [(RelationName, LexicalForm)]
+  -> Map SynsetKey (Set (RelationName, LexicalForm))
 identifyingRelations index synsetMap =
   M.fromListWith (<>) . concatMap go $ mapSynsets synsetMap
   where
@@ -49,14 +49,14 @@ identifyingRelations index synsetMap =
       ++ concatMap (fmap getIdRel . coerce . pointers) wordSenses
     getIdRel (Relation _ WNid{idRel = Nothing}) = Nothing
     getIdRel (Relation _ wnid@WNid{idRel = Just (idRel, targetLexForm)})
-      = Just (synsetKey targetSynset, [(idRel, targetLexForm)])
+      = Just (synsetKey targetSynset, S.singleton (idRel, targetLexForm))
       where
         targetSynset = findSynset wnid index synsetMap
 
 ---
 -- JSON/aeson
 synsetToJSON :: ValIndex -> SynsetMap Validated
-  -> Map SynsetKey [(RelationName, LexicalForm)]
+  -> Map SynsetKey (Set (RelationName, LexicalForm))
   -> Map Text Text -> Map Text Int -> Synset Validated -> Value
 synsetToJSON index synsetMap idRelsMap textToCanonicNames _
   synset@Synset{comments, wordSenses = wordSenses@(WSense{lexicalForm = headLexForm}:|_), ..}
@@ -75,7 +75,7 @@ synsetToJSON index synsetMap idRelsMap textToCanonicNames _
   where
     synsetK = synsetKey synset
     idRels Nothing = []
-    idRels (Just xs) = [ "_references" .= map toIdRel xs ]
+    idRels (Just xs) = [ "_references" .= map toIdRel (S.toList xs) ]
     toIdRel (name, targetLexForm) = (lookupRelName name, targetLexForm)
     senseIdText lexicalForm (wnName, wnPOS, lexname, offset) =
       T.intercalate "-" [wnName, showLongWNPOS wnPOS, lexname, coerce lexicalForm
