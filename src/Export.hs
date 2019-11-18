@@ -55,8 +55,10 @@ identifyingRelations index synsetMap =
 
 ---
 -- JSON/aeson
-synsetToJSON :: ValIndex -> SynsetMap Validated -> Map Text Text -> Map Text Int -> Synset Validated -> Value
-synsetToJSON index synsetMap textToCanonicNames _
+synsetToJSON :: ValIndex -> SynsetMap Validated
+  -> Map SynsetKey [(RelationName, LexicalForm)]
+  -> Map Text Text -> Map Text Int -> Synset Validated -> Value
+synsetToJSON index synsetMap idRelsMap textToCanonicNames _
   synset@Synset{comments, wordSenses = wordSenses@(WSense{lexicalForm = headLexForm}:|_), ..}
   = object
     $ synsetFrames extra
@@ -72,20 +74,23 @@ synsetToJSON index synsetMap textToCanonicNames _
     ]
   where
     synsetK = synsetKey synset
-    idRelsMap = identifyingRelations index synsetMap
     idRels Nothing = []
-    idRels (Just xs) = [ "idRelations" .= xs ]
+    idRels (Just xs) = [ "idRelations" .= map exportName xs ]
+      where
+        exportName (name, targetLexForm) = (lookupRelName name, targetLexForm)
     senseIdText lexicalForm (wnName, wnPOS, lexname, offset) =
       T.intercalate "-" [wnName, showLongWNPOS wnPOS, lexname, coerce lexicalForm
                         , tshow offset]
     synsetFrames (WNVerb frames) = ["frames" .= NE.toList frames]
     synsetFrames _ = []
     toRelation (Relation name wnid@WNid{lexForm}) =
-      object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames
+      object ["name" .= lookupRelName name
              , "id" .= senseIdText lexForm targetSynsetKey]
       where
         targetSynsetKey = synsetKey $ findSynset wnid index synsetMap
-    missingRelation name = "No relation with name " ++ show name ++ " found in relation.tsv"
+    lookupRelName name = unsafeLookup missingRelation name textToCanonicNames
+      where
+        missingRelation = "No relation with name " ++ show name ++ " found in relation.tsv"
     toWordSense (WSense lexicalForm wExtra pointers)
       = object $
         wordExtra wExtra
@@ -101,7 +106,9 @@ synsetToJSON index synsetMap textToCanonicNames _
 synsetsToSynsetJSONs :: ValIndex -> SynsetMap Validated -> Map Text Text -> Map Text Int -> NonEmpty (Synset Validated) -> Builder
 synsetsToSynsetJSONs index synsetMap textToCanonicNames lexNamesToLexNum synsets
   = mconcat . NE.toList . NE.intersperse (charUtf8 '\n')
-  $ NE.map (fromEncoding . toEncoding . synsetToJSON index synsetMap textToCanonicNames lexNamesToLexNum) synsets
+  $ NE.map (fromEncoding . toEncoding . synsetToJSON index synsetMap idRelsMap textToCanonicNames lexNamesToLexNum) synsets
+  where
+    idRelsMap = identifyingRelations index synsetMap
 
 
 ---
