@@ -7,6 +7,7 @@ from rdflib import Graph, Namespace
 from rdflib.namespace import RDF
 from rdflib.term import Literal
 import click
+from itertools import chain
 
 ###
 ## constants
@@ -125,13 +126,36 @@ def print_graph(graph, output_dir):
     langs     = set(graph.objects(predicate=WN_LANG))
     for lang in langs:
         CURRENT_LANG = lang
-        output_dir = os.path.join(output_dir, lang)
-        os.makedirs(output_dir, exist_ok=True)
+        lang_output_dir = os.path.join(output_dir, lang)
+        os.makedirs(lang_output_dir, exist_ok=True)
         print(lang)
         for lexicographer_file in lex_files:
-            print_lexfile(graph, lexicographer_file, output_dir)
+            print_lexfile(graph, lexicographer_file, lang_output_dir)
             print("  {}".format(lexicographer_file))
 
+def summarize(graph, node):
+    print(node)
+    print("  subject")
+    for pred, obj in graph.predicate_objects(node):
+        print("    {} {}".format(r.namespace.split_uri(pred)[1], obj))
+    print("  object")
+    for subj, pred in graph.subject_predicates(node):
+        print("    {} {}".format(subj, r.namespace.split_uri(pred)[1]))
+    return None
+
+# def find_inter(graph):
+#     # for debugging: find relation between english sense and pt sense
+#     for subj, obj in graph.subject_objects(WN_TEMP_ID):
+#         subj_synset = graph.value(None, WN_CONTAINS_WORDSENSE, subj)
+#         obj_synset = graph.value(None, WN_CONTAINS_WORDSENSE, obj)
+#         subj_lang = graph.value(subj_synset, WN_LANG)
+#         obj_lang = graph.value(obj_synset, WN_LANG)
+#         assert all([subj_synset, subj_lang, obj_synset, obj_lang]), (subj, obj)
+#         if subj_lang != Literal("pt") and subj_lang != obj_lang:
+#             summarize(subj)
+#             summarize(obj)
+#             break
+#     return None
 
 def sort_word_senses(graph, synset):
     def word_sense_form(ws):
@@ -222,8 +246,20 @@ def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
                         return True # clashed
         return False
     #
+    def pick_lexical_id_relation(index):
+        lexical_id_form = Literal(str(index))
+        lexical_id_senses = graph.subjects(WN_LEXICAL_FORM, lexical_id_form)
+        for lexical_id_sense in lexical_id_senses:
+            lexical_id_synset = graph.value(predicate=WN_CONTAINS_WORDSENSE,
+                                            object=lexical_id_sense, any=False)
+            lexical_id_lang = graph.value(lexical_id_synset, WN_LANG, any=False)
+            synset_lang = graph.value(synset, WN_LANG, any=False)
+            assert lexical_id_lang and synset_lang, lexical_id_sense
+            if lexical_id_lang == synset_lang:
+                if not is_clash(WN_TEMP_ID, lexical_id_form):
+                    return lexical_id_sense
+    #
     def find_any_relation():
-        from itertools import chain
         global INDISTINGUISHABLES
         id_relation = None
         # try synset relations
@@ -249,14 +285,13 @@ def pick_word_sense_relation_id(graph, lexicographer_file, word_sense, synset):
         # last resort: create artificial lexicalId relation
         INDISTINGUISHABLES += 1
         lexical_id = graph.value(word_sense, WN_LEXICAL_ID)
-        lexical_id_form = Literal(str(lexical_id))
-        lexical_id_sense = graph.value(predicate=WN_LEXICAL_FORM, object=lexical_id_form)
-        assert lexical_id_sense
-        graph.set((word_sense, WN_TEMP_ID, lexical_id_sense))
-        if not is_clash(WN_TEMP_ID, lexical_id_sense):
-            return (WN_TEMP_ID, lexical_id_sense)
-        else:
-            assert False, word_sense
+        lexical_id_sense = None
+        for i in chain([int(lexical_id)], range(0, 30)):
+            lexical_id_sense = pick_lexical_id_relation(i)
+            if lexical_id_sense:
+                graph.set((word_sense, WN_TEMP_ID, lexical_id_sense))
+                return (WN_TEMP_ID, lexical_id_sense)
+        assert False, word_sense
     #
     def synonym_clash(sibling_lexical_form):
         for other_synset in clashes:
@@ -303,6 +338,7 @@ def pick_synset_ids(graph, lexicographer_file, synset):
     return None
 
 def pick_wn_ids(graph):
+    graph.remove((None, WN_TEMP_ID, None))
     graph.remove((None, WN_ID_RELATION,  None))
     graph.remove((None, WN_ID_WORDSENSE, None))
     graph.remove((None, WN_ID_TARGET,    None))
@@ -313,26 +349,28 @@ def pick_wn_ids(graph):
     return None
 
 def print_id_map(graph, output_file):
+    # include PoS information? (as synset-id doesn't include PoS)
     with open(output_file, 'w+') as output_stream:
         for synset, lexicographer_file in graph.subject_objects(WN_LEXICOGRAPHER_FILE):
-            synset_id = graph.value(synset, WN_SYNSET_ID)
-            assert synset_id, synset
-            for sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
-                sense_key = graph.value(sense, WN_SENSEKEY)
-                assert sense_key, sense
-                sense_lexical_form = graph.value(sense, WN_LEXICAL_FORM)
-                assert sense_lexical_form, sense
-                sense_id_relation = graph.value(sense, WN_ID_RELATION)
-                if sense_id_relation:
-                    _, sense_id_relation = r.namespace.split_uri(sense_id_relation)
-                sense_id_target = graph.value(sense, WN_ID_TARGET)
-                if (sense_id_target, WN_CONTAINS_WORDSENSE, None) in graph:
-                    sense_id_target = graph.value(sense_id_target, WN_ID_WORDSENSE)
-                sense_id_target_lexical_form = graph.value(sense_id_target, WN_LEXICAL_FORM)
-                assert sense_id_relation and sense_id_target_lexical_form if sense_id_relation or sense_id_target_lexical_form else True, sense
-                print(sense_key, synset_id, lexicographer_file, sense_lexical_form,
-                      sense_id_relation, sense_id_target_lexical_form,
-                      sep='\t', file=output_stream)
+            if (synset, WN_LANG, Literal("en")):
+                synset_id = graph.value(synset, WN_SYNSET_ID)
+                assert synset_id, synset
+                for sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
+                    sense_key = graph.value(sense, WN_SENSEKEY)
+                    assert sense_key, sense
+                    sense_lexical_form = graph.value(sense, WN_LEXICAL_FORM)
+                    assert sense_lexical_form, sense
+                    sense_id_relation = graph.value(sense, WN_ID_RELATION)
+                    if sense_id_relation:
+                        _, sense_id_relation = r.namespace.split_uri(sense_id_relation)
+                    sense_id_target = graph.value(sense, WN_ID_TARGET)
+                    if (sense_id_target, WN_CONTAINS_WORDSENSE, None) in graph:
+                        sense_id_target = graph.value(sense_id_target, WN_ID_WORDSENSE)
+                    sense_id_target_lexical_form = graph.value(sense_id_target, WN_LEXICAL_FORM)
+                    assert sense_id_relation and sense_id_target_lexical_form if sense_id_relation or sense_id_target_lexical_form else True, sense
+                    print(sense_key, synset_id, lexicographer_file, sense_lexical_form,
+                          sense_id_relation, sense_id_target_lexical_form,
+                          sep='\t', file=output_stream)
     return None
 
 ###
