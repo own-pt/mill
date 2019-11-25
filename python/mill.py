@@ -352,7 +352,7 @@ def print_id_map(graph, output_file):
     # include PoS information? (as synset-id doesn't include PoS)
     with open(output_file, 'w+') as output_stream:
         for synset, lexicographer_file in graph.subject_objects(WN_LEXICOGRAPHER_FILE):
-            if (synset, WN_LANG, Literal("en")):
+            if (synset, WN_LANG, Literal("en")) in graph:
                 synset_id = graph.value(synset, WN_SYNSET_ID)
                 assert synset_id, synset
                 for sense in graph.objects(synset, WN_CONTAINS_WORDSENSE):
@@ -363,10 +363,10 @@ def print_id_map(graph, output_file):
                     sense_id_relation = graph.value(sense, WN_ID_RELATION)
                     if sense_id_relation:
                         _, sense_id_relation = r.namespace.split_uri(sense_id_relation)
-                    sense_id_target = graph.value(sense, WN_ID_TARGET)
-                    if (sense_id_target, WN_CONTAINS_WORDSENSE, None) in graph:
-                        sense_id_target = graph.value(sense_id_target, WN_ID_WORDSENSE)
-                    sense_id_target_lexical_form = graph.value(sense_id_target, WN_LEXICAL_FORM)
+                        sense_id_target = graph.value(sense, WN_ID_TARGET)
+                        if (sense_id_target, WN_CONTAINS_WORDSENSE, None) in graph:
+                            sense_id_target = graph.value(sense_id_target, WN_ID_WORDSENSE)
+                        sense_id_target_lexical_form = graph.value(sense_id_target, WN_LEXICAL_FORM)
                     assert sense_id_relation and sense_id_target_lexical_form if sense_id_relation or sense_id_target_lexical_form else True, sense
                     print(sense_key, synset_id, lexicographer_file, sense_lexical_form,
                           sense_id_relation, sense_id_target_lexical_form,
