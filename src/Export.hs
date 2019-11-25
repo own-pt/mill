@@ -5,14 +5,14 @@ import Data ( WNid(..), WNExtra(..), Relation(..), SynsetKey
             , Synset(..), Validated, WNPOS(..), RelationName
             , SynsetRelation(..), WSense(..), WordPointer(..)
             , LexicographerFileId(..), LexicalForm(..), synsetType
-            , unsafeLookup, lexicographerFileIdToText
+            , unsafeLookup, lexicographerFileIdToText, lexicographerFileName
             , synsetKey, tshow, extraFrames, showLongWNPOS, senseKey
             )
 import Validate (ValIndex, SynsetMap, lookupIndex
                 , lookupSynset, findSynset, wordSenseKey, mapSynsets)
 ---
-import Data.Aeson ( ToJSON(..), fromEncoding, Value
-                  , object, (.=) )
+import Data.Aeson ( fromEncoding, Value, genericToEncoding, SumEncoding( UntaggedValue )
+                  , object, (.=), Options(..), defaultOptions)
 import qualified Data.ByteString as B
 import Data.ByteString.Builder (Builder,charUtf8)
 import Data.CaseInsensitive ( foldCase )
@@ -107,11 +107,73 @@ synsetToJSON index synsetMap idRelsMap textToCanonicNames _
         wordExtra (WNVerb frames) = ["frames" .= NE.toList frames]
         wordExtra _ = []
 
+synsetToJSONLD :: ValIndex -> SynsetMap Validated
+  -> Map SynsetKey (Set (RelationName, LexicalForm))
+  -> Map Text Text -> Map Text Int -> Synset Validated -> Value
+synsetToJSONLD index synsetMap idRelsMap textToCanonicNames _
+  synset@Synset{comments, wordSenses = wordSenses@(WSense{lexicalForm = headLexForm}:|_), ..}
+  = object $ concat [
+  synsetFrames extra
+  , getRelations (map coerce relations)
+  , if null comments then [] else ["_comments" .= comments]
+  , if null examples then [] else ["examples"   .= examples]
+  , maybe [] (\rs -> ["_references" .= map toIdRel (S.toList rs)]) (idRelsMap M.!? synsetK)
+  , [ "@id"         .= senseIdText headLexForm synsetK
+    , "lexicographerFile" .= lexicographerFileIdToText lexicographerFileId
+    , "wn" .= synsetWN
+    , "pos" .= synsetPOS
+    , "wordsenses" .= NE.map toWordSense wordSenses
+    , "definition" .= definition
+    , "_position"   .= sourcePosition
+    ]
+  ]
+  where
+    synsetK@(synsetWN,synsetPOS,_,_) = synsetKey synset
+    toIdRel (name, targetLexForm) = (lookupRelName name, targetLexForm)
+    senseIdText lexicalForm (wnName, wnPOS, lexname, offset) =
+      T.intercalate "-" [wnName, showLongWNPOS wnPOS, lexname, coerce lexicalForm
+                        , tshow offset]
+    getRelations = map toRelation . NE.groupBy sameRel
+      where
+        sameRel (Relation name _) (Relation name' _) = name == name'
+    synsetFrames (WNVerb frames) = ["frames" .= NE.toList frames]
+    synsetFrames _ = []
+    toRelation (r@(Relation name _):|rs) =
+      lookupRelName name .= map toRel (r:rs)
+      where
+        toRel (Relation _ wnid@WNid{lexForm, idRel}) =
+          object [
+          "target" .= senseIdText lexForm targetSynsetKey
+          , "_reference" .= object
+            [ "_targetLexicalForm" .= lexForm
+            , "_targetIdRelation" .= fmap toIdRel idRel
+            , "_targetLexFile" .= lexicographerFileName wnid]
+          ]
+          where
+            targetSynsetKey = synsetKey $ findSynset wnid index synsetMap
+    lookupRelName name = unsafeLookup missingRelation name textToCanonicNames
+      where
+        missingRelation = "No relation with name " ++ show name ++ " found in relation.tsv"
+    toWordSense (WSense lexicalForm wExtra pointers)
+      = object $
+      concat
+      [ wordExtra wExtra
+      , [ "lexicalForm" .= lexicalForm ]
+      , getRelations (map coerce pointers)
+      , ["@id" .= senseIdText lexicalForm synsetK]
+      ]
+      where
+        wordExtra (WNAdj marker)  = ["syntacticMarker" .= marker]
+        wordExtra (WNVerb frames) = ["frames" .= NE.toList frames]
+        wordExtra _ = []
+
 
 synsetsToSynsetJSONs :: ValIndex -> SynsetMap Validated -> Map Text Text -> Map Text Int -> NonEmpty (Synset Validated) -> Builder
 synsetsToSynsetJSONs index synsetMap textToCanonicNames lexNamesToLexNum synsets
   = mconcat . NE.toList . NE.intersperse (charUtf8 '\n')
-  $ NE.map (fromEncoding . toEncoding . synsetToJSON index synsetMap idRelsMap textToCanonicNames lexNamesToLexNum) synsets
+  $ NE.map (fromEncoding
+            . genericToEncoding defaultOptions{omitNothingFields=True, sumEncoding=UntaggedValue}
+            . synsetToJSONLD index synsetMap idRelsMap textToCanonicNames lexNamesToLexNum) synsets
   where
     idRelsMap = identifyingRelations index synsetMap
 
@@ -227,7 +289,7 @@ showDBSynset offsetMap DBSynset{ _id, lexicographerFileNum, pos, wordSenses, fra
     pointerCount = padNum 3 $ length relations
     wordCount = paddedHex 2 $ NE.length wordSenses
     idOffset = wnIdentifierToOffset offsetMap . coerce
-    offsetDoc = idOffset _id 
+    offsetDoc = idOffset _id
     paddedHex n h = padText n . T.pack $ showHex h ""
     synsetWord (wordForm, lexId) = T.unwords [T.replace " " "_" wordForm, T.pack $ showHex lexId ""]
     synsetPointer (pointerSym, targetId, targetPos, (sourceNum,targetNum))

@@ -86,6 +86,9 @@ synsetType A = 3
 synsetType R = 4
 synsetType S = 5
 
+lexicographerFileName :: WNid -> Text
+lexicographerFileName = lexicographerFileIdToText . idLexFile
+
 lexicographerFileIdToText :: LexicographerFileId -> Text
 lexicographerFileIdToText LexicographerFileId{pos, lexname} =
   T.concat [posText pos, ".", lexname]
