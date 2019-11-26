@@ -1,12 +1,13 @@
 module Main where
 
-import Data (OneWN)
+import Data (OneWN, IRI)
 import Lib ( canonicalDir
            , validateLexicographerFile
            , validateLexicographerFiles
            , lexicographerFilesJSON
-           , readConfig
+           , lexicographerFilesJSONLD
            , toWNDB
+           , readConfig
            , Config(oneWN)
            )
 
@@ -16,14 +17,14 @@ import qualified Data.Text as T
 import Options.Applicative ( (<|>), argument, command, customExecParser, eitherReader, flag, fullDesc
                            , header, help, helper, hsubparser, info, long, metavar, option, Parser
                            , ParserInfo, prefs, progDesc, showHelpOnError
-                           , ReadM, short, str, switch, value
+                           , ReadM, short, str, switch, value, strOption
                            )
 import System.Directory (doesDirectoryExist)
 --import Debug.Trace (trace)
 
 type ConfigDir   = Maybe FilePath
 
-data ExportFormat = WNJSON | WNDB deriving (Show)
+data ExportFormat = WNJSON | WNJSONLD IRI | WNDB deriving (Show)
 
 data MillCommand = MillCommand ConfigDir Bool OneWN MillSubCommand
 
@@ -91,9 +92,12 @@ parseExportCommand :: Parser MillSubCommand
 parseExportCommand = exportParser
   where
     jsonFlag = flag WNJSON WNJSON (long "json" <> help "Export to JSON format [default]")
+    jsonLD   = WNJSONLD <$> strOption (long "jsonld"
+                                       <> help "Export to JSONLD format using provided base IRI"
+                                       <> metavar "IRI")
     wndbFlag = flag WNJSON WNDB   (long "wndb" <> help "Export to WNDB format")
     exportParser
-      = Export <$> (jsonFlag <|> wndbFlag) <*> inPath <*> outputPath
+      = Export <$> (jsonFlag <|> jsonLD <|> wndbFlag) <*> inPath <*> outputPath
     inPath = argument str
       (metavar "INPATH" <> help "Input path. If configuration directory was not provided, it is assumed to be in the same path.")
     outputPath = argument str
@@ -138,10 +142,14 @@ export configDir noCache oneWN format inputPath outputPath = do
   config <- getConfig configDir noCache oneWN inputPath
   case format of
     WNJSON -> exportJSON outputPath config
+    WNJSONLD baseIRI -> exportJSONLD baseIRI outputPath config
     WNDB -> exportWNDB outputPath config
 
 exportJSON :: FilePath -> Config -> IO ()
 exportJSON outputFile = runReaderT $ lexicographerFilesJSON outputFile
+
+exportJSONLD :: IRI -> FilePath -> Config -> IO ()
+exportJSONLD baseIRI outputFile = runReaderT $ lexicographerFilesJSONLD baseIRI outputFile
 
 exportWNDB :: FilePath -> Config -> IO ()
 exportWNDB outputDir config =

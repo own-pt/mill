@@ -7,26 +7,26 @@ module Lib
    , validateLexicographerFile
    , validateLexicographerFiles
    , lexicographerFilesJSON
-    , readConfig
+   , lexicographerFilesJSONLD
+   , readConfig
    , toWNDB
     ) where
 
-import Data ( Synset(..), Unvalidated, Validated, OneWN
-            , Validation(..), SourceValidation, singleton
+import Data ( Synset(..), Unvalidated, Validated, OneWN, IRI
+            , Validation(..), SourceValidation, singleton, WNName
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
             , showLongWNPOS, synsetPOS, unsafeLookup, validation )
-import Export ( DBSynset(..), calculateOffsets, wndbIndex, newline
+import Export ( DBSynset(..), calculateOffsets, wndbIndex, newline, synsetsToJSONLD
               , showDBSynset, showWNDBindex, synsetsToSynsetJSONs, wndbSenseIndex )
 import Parse (parseLexicographer)
 import Validate ( makeIndex, ValIndex, SynsetMap, mapSynsets, removeInterWNRelations
                 , validateSynsets )
 ----------------------------------
---import Debug.Trace (trace)
 import Control.Monad (unless,mapM)
 import Control.Monad.Reader (ReaderT(..), ask, liftIO)
 import Data.Binary (encodeFile,decodeFileOrFail)
-import Data.ByteString.Builder (hPutBuilder)
+import Data.ByteString.Builder (Builder, hPutBuilder)
 import Data.Coerce (coerce)
 import Data.Either (partitionEithers)
 import Data.List (intercalate, find, intersperse)
@@ -49,6 +49,7 @@ import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryI
                         , doesDirectoryExist, doesPathExist, withCurrentDirectory )
 import System.FilePath ((</>), normalise, equalFilePath)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
+--import Debug.Trace (trace)
 
 
 -- | This datastructure contains the information found in the
@@ -73,6 +74,7 @@ data Config = Config
   , mainWNDir :: FilePath
   -- | Ignore cache
   , noCache :: Bool
+  , wnIRIs :: Map WNName IRI
   } deriving (Show,Eq)
 
 
@@ -105,17 +107,18 @@ readConfig :: Bool -> OneWN -> FilePath -> FilePath -> IO Config
 readConfig noCache oneWN wnPath configurationDir = do
   lexNamesInput              <- readTSVwith (configurationDir </> "lexnames.tsv") lexnamesReader
   relationsInput             <- readTSVwith (configurationDir </> "relations.tsv") relationsReader
-  (wnNames, wnRelativePaths) <- unzip <$> readTSVwith (configurationDir </> "wns.tsv") wnsReader
+  (wnNames, wnRelativePaths, wnIRIs) <- unzip3 <$> readTSVwith (configurationDir </> "wns.tsv") wnsReader
   wnAbsolutePaths            <- mapM toAbsolutePath wnRelativePaths
   let lexnamesToId       = toMap toLexnamesToId lexNamesInput
       textToCanonicNames = toMap toTextToCanonicName relationsInput
       canonicToDomain    = toMap toCanonicToDomain relationsInput
       textToLexRelations = toMap toTextToLexRelations relationsInput
       wnPaths            = toMap id $ zip wnNames wnAbsolutePaths
+      wnIRIsMap          = toMap id $ zip wnNames wnIRIs
   return $ Config { oneWN, lexnamesToId, textToCanonicNames
                   , canonicToDomain, textToLexRelations
                   , mainWNDir = wnPath, wnPaths
-                  , noCache
+                  , noCache, wnIRIs = wnIRIsMap
                   }
   where
     readTSVwith filePath reader = readTSV reader <$> TIO.readFile filePath
@@ -138,7 +141,7 @@ readConfig noCache oneWN wnPath configurationDir = do
                , (readListField readWNObj domain, readListField readShortWNPOS pos))
               ]
     relationsReader _ = Left "Wrong number of fields in relations.tsv"
-    wnsReader [wnName, relativePath] = Right [(wnName, relativePath)]
+    wnsReader [wnName, relativePath, wnIRI] = Right [(wnName, relativePath, wnIRI)]
     wnsReader _ = Left "Wrong number of fiels in wns.tsv"
     readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
                                                                  
@@ -179,6 +182,15 @@ parseLexicographerFiles filePaths = do
       in return $ validateSynsets validIndex synsetMap synsets
     Failure sourceErrors -> return $ Failure sourceErrors
 
+writeBuilderTo :: Builder -> FilePath -> IO ()
+writeBuilderTo builder outputFile
+  = withFile outputFile WriteMode write
+  where
+    write handle = do
+      _ <- handle `hSetBinaryMode` True
+      _ <- handle `hSetBuffering` BlockBuffering Nothing
+      handle `hPutBuilder` builder
+
 lexicographerFilesJSON :: FilePath -> App ()
 lexicographerFilesJSON outputFile = do
   Config{lexnamesToId, textToCanonicNames} <- ask
@@ -187,13 +199,18 @@ lexicographerFilesJSON outputFile = do
     Failure errors -> liftIO $ prettyPrintList errors
     Success (synsetMap, valIndex, synsets) ->
       let jsonBuilder = synsetsToSynsetJSONs valIndex synsetMap textToCanonicNames lexnamesToId synsets
-      in liftIO
-         $ withFile outputFile WriteMode (`write` jsonBuilder) 
-  where
-    write handle builder = do
-      _ <- handle `hSetBinaryMode` True
-      _ <- handle `hSetBuffering` BlockBuffering Nothing
-      handle `hPutBuilder` builder
+      in liftIO $ jsonBuilder `writeBuilderTo` outputFile
+
+
+lexicographerFilesJSONLD :: IRI -> FilePath -> App ()
+lexicographerFilesJSONLD baseIRI outputFile = do
+  Config{lexnamesToId, textToCanonicNames, wnIRIs} <- ask
+  result <- getValidated
+  case result of
+    Failure errors -> liftIO $ prettyPrintList errors
+    Success (synsetMap, valIndex, synsets) ->
+      let jsonBuilder = synsetsToJSONLD wnIRIs baseIRI valIndex synsetMap textToCanonicNames lexnamesToId synsets
+      in liftIO $ jsonBuilder `writeBuilderTo` outputFile
   
 
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()

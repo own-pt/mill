@@ -162,6 +162,8 @@ newtype SynsetId =
   deriving anyclass (Binary,ToJSON)
   deriving newtype (Pretty)
 
+type IRI = Text
+
 type RelationName = Text
 data Relation = Relation RelationName WNid
   deriving (Binary,Eq,Generic,Ord,Show,ToJSON)
