@@ -93,7 +93,7 @@ synsetToJSONLD index synsetMap idRelsMap textToCanonicNames _
       where
         toRel (Relation _ wnid@WNid{lexForm, idRel}) =
           object [
-          target .= senseIdText lexForm targetSynsetKey
+           atID .= senseIdText lexForm targetSynsetKey
           , _reference .= object
             [ _targetLexicalForm .= lexForm
             , _targetIdRelation .= fmap toIdRel idRel
@@ -117,9 +117,9 @@ synsetToJSONLD index synsetMap idRelsMap textToCanonicNames _
         wordExtra (WNVerb frames) = ["frames" .= NE.toList frames]
         wordExtra _ = []
 
-target, _targetLexicalForm, _targetIdRelation, _targetLexFile, _comments
-  , _references, _sourceBegin, _sourceEnd, _reference, _synset :: Text
-target = "target"
+atID, _targetLexicalForm, _targetIdRelation, _targetLexFile, _comments
+  , _references, _sourceBegin, _sourceEnd, _reference :: Text
+atID = "@id"
 _targetLexicalForm = "_targetLexicalForm"
 _targetIdRelation = "_targetIdRelation"
 _targetLexFile = "_targetLexFile"
@@ -128,7 +128,6 @@ _references = "_references"
 _sourceBegin = "_sourceBegin"
 _sourceEnd = "_sourceEnd"
 _reference = "_reference"
-_synset = "_synset"
 
 jsonldContext :: [(WNName, IRI)] -> IRI -> [RelationName] -> Value
 -- | add JSON-LD @context to JSON value (which should be object)
@@ -136,7 +135,7 @@ jsonldContext wnIRIs baseIRI rels
   = object $ concat
     [ map (uncurry (.=)) wnIRIs
     , map toBaseIRI rels
-    , map toBaseIRI [target, _targetLexicalForm, _targetIdRelation, _synset
+    , map toBaseIRI [_targetLexicalForm, _targetIdRelation
                     , _targetLexFile, _comments, _references
                     , _sourceBegin, _sourceEnd, _reference
                     ]
@@ -153,8 +152,8 @@ synsetsToJSONLD wnIRIs baseIRI index synsetMap textToCanonicNames lexNamesToLexN
   where
     idRelsMap = identifyingRelations index synsetMap
     wrapContext synsetsJSON
-      = object [ "@context" .= jsonldContext (M.toList wnIRIs) baseIRI (M.elems textToCanonicNames)
-               , _synset .= synsetsJSON
+      = object [ "@graph" .= synsetsJSON
+               , "@context" .= jsonldContext (M.toList wnIRIs) baseIRI (M.elems textToCanonicNames)
                ]
 
 synsetsToSynsetJSONs :: ValIndex -> SynsetMap Validated -> Map Text Text -> Map Text Int -> NonEmpty (Synset Validated) -> Builder
