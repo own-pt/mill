@@ -200,7 +200,7 @@ def fixes_to_pt_rdf(graph):
 @click.argument('output_dir'
                 , type=click.Path(file_okay=False, resolve_path=True, writable=True), required=True)
 @click.argument('sense_map_file',
-                type=click.File(mode="wb"), required=True)
+                type=click.Path(file_okay=True, resolve_path=True, writable=True), required=True)
 @click.option('-f', '--rdf-file-format', 'rdf_file_format'
               , type=click.STRING, default='nt', show_default=True,
               help="RDF input format. Must be accepted by RDFlib.")

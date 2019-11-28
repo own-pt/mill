@@ -32,8 +32,10 @@
     (modify-syntax-entry ?_ "w")
     (modify-syntax-entry ?' "w")
     (modify-syntax-entry ?@ "w")
+    (modify-syntax-entry ?] "w")
+    (modify-syntax-entry ?[ "w")
     ;; comments
-    ;;; actually comments are only valid at the beginning of synsets
+;;; actually comments are only valid at the beginning of synsets
     (modify-syntax-entry ?# "<" st)
     (modify-syntax-entry ?\n ">" st)
     st)

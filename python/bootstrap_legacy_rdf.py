@@ -293,8 +293,8 @@ def use_frame_numbers(graph):
 
 def fix_satellite_lexical_ids(graph):
     # fix lexical ids of satellite senses
-    ## must be run after add_source_begin and make_similar_to_one_way
-    synsets = graph.subjects(WN_SIMILAR_TO, None) # run when only satellites are heads of similarTo relations
+    ## must be run after add_source_begin
+    synsets = graph.subjects(WN_LEXICOGRAPHER_FILE, Literal("adj.all"))
     english_synsets = filter(lambda s: graph.value(s, WN_LANG).eq(EN), synsets)
     aux = {}
     for synset in sort_synsets(graph, english_synsets):
@@ -306,16 +306,17 @@ def fix_satellite_lexical_ids(graph):
     return None
 
 def create_sense_map(graph, sense_map_file):
-    for synset, sense in graph.subject_objects(WN_CONTAINS_WORDSENSE):
-        if (synset, WN_LANG, EN) in graph:
-            synset_id = graph.value(synset, WN_SYNSET_ID, any=False)
-            sense_key = graph.value(sense, WN_SENSEKEY, any=False)
-            lexicographer_file = graph.value(synset, WN_LEXICOGRAPHER_FILE, any=False)
-            lexical_form = graph.value(sense, WN_LEXICAL_FORM, any=False)
-            lexical_id = graph.value(sense, WN_LEXICAL_ID, any=False)
-            new_sense_id = "{}-{}-{}[{}]".format(EN, lexicographer_file, lexical_form, lexical_id)
-            assert all([synset_id, sense_key, lexicographer_file, lexical_form, lexical_id]), sense
-            print("{}\t{}\t{}".format(sense_key, synset_id, new_sense_id), file=sense_map_file)
+    with open(sense_map_file, "w") as f:
+        for synset, sense in graph.subject_objects(WN_CONTAINS_WORDSENSE):
+            if (synset, WN_LANG, EN) in graph:
+                synset_id = graph.value(synset, WN_SYNSET_ID, any=False)
+                sense_key = graph.value(sense, WN_SENSEKEY, any=False)
+                lexicographer_file = graph.value(synset, WN_LEXICOGRAPHER_FILE, any=False)
+                lexical_form = graph.value(sense, WN_LEXICAL_FORM, any=False)
+                lexical_id = graph.value(sense, WN_LEXICAL_ID, any=False)
+                new_sense_id = "{}-{}-{}[{}]".format(EN, lexicographer_file, lexical_form, lexical_id)
+                assert all([synset_id, sense_key, lexicographer_file, lexical_form, lexical_id]), sense
+                print("{}\t{}\t{}".format(sense_key, synset_id, new_sense_id), file=f)
     return None
 
 
@@ -348,7 +349,7 @@ def fixes_to_legacy_rdf(graph, config_dir, sense_map_file):
 @click.argument('output_dir'
                 , type=click.Path(file_okay=False, resolve_path=True, writable=True), required=True)
 @click.argument('sense_map_file',
-                type=click.File(mode="wb"), required=True)
+                type=click.Path(file_okay=True, resolve_path=True, writable=True), required=True)
 @click.option('-f', '--rdf-file-format', 'rdf_file_format'
               , type=click.STRING, default='nt', show_default=True,
               help="RDF input format. Must be accepted by RDFlib.")

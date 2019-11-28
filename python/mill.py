@@ -175,7 +175,7 @@ def word_sense_id(graph, lexicographer_file, word_sense, synset=None):
     assert in_lang, word_sense
     assert lexical_form, word_sense
     assert lexical_id, word_sense
-    return (in_lang, lexicographer_file, lexical_form, lexical_id)
+    return (in_lang, lexicographer_file, lexical_form, int(lexical_id))
 
 
 def synset_id(graph, lexicographer_file, synset, target_lexical_form):
@@ -191,7 +191,7 @@ def print_word_sense_id(wordsense_id, lexicographer_file=None):
     (in_lang, in_lexfile, lexical_form, lexical_id) = wordsense_id
     lexfile_str = "{}:".format(in_lexfile) if in_lexfile.neq(lexicographer_file) else ""
     prefix = "{}".format(lexfile_str) if in_lang == CURRENT_LANG else "@{}:{}:".format(in_lang, in_lexfile)
-    maybe_lexical_id = "" if lexical_id.eq("0") else "[{}]".format(lexical_id)
+    maybe_lexical_id = "" if lexical_id == 0 else "[{}]".format(lexical_id)
     return "{}{}{}".format(prefix, lexical_form, maybe_lexical_id)
 
 
