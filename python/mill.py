@@ -3,7 +3,7 @@
 import json
 import os
 import rdflib as r
-from rdflib import Graph, Namespace
+from rdflib import Graph, Namespace, BNode
 from rdflib.namespace import RDF
 from rdflib.term import Literal
 import click
@@ -312,17 +312,17 @@ def to_graph(synsets_gen, release=False):
         return components[0]
 
     def add_relation(head, relation, obj=SYNSET):
-        target_id_str = relation[ID]
+        target_id_str = relation["targetId"]
         target_wn = parse_id_wn_name(target_id_str)
-        target_id = make_id(wn_name, target_id_str, obj)
+        target_id = make_id(target_wn, target_id_str, obj)
         relation_name = WN30[relation[NAME]]
-        if release:
+        if release or obj == WSENSE:
             g.add((head, relation_name, target_id))
         else :
             bnode = BNode()
             g.add((head, relation_name, bnode))
             g.add((bnode, WN_TARGET, target_id))
-            target_lexical_form = relation[TARGET_LEXICAL_FORM]
+            target_lexical_form = Literal(relation[TARGET_LEXICAL_FORM])
             g.add((bnode, WN_TARGET_LEXICAL_FORM, target_lexical_form))
 
     def add_frame(head, frame):
@@ -348,7 +348,7 @@ def to_graph(synsets_gen, release=False):
         lexicographer_file = Literal(synset[LEXICOGRAPHER_FILE])
         synset_type = SYNSETTYPE[synset["pos"]]
         g.add((synset_id, WN30[LANG], Literal(wn_name)))
-        g.add((synset_id, RDF_type, synset_type))
+        g.add((synset_id, RDF_TYPE, synset_type))
         g.add((synset_id, WN30[LEXICOGRAPHER_FILE], lexicographer_file))
         g.add((synset_id, WN30[DEFINITION], Literal(synset[DEFINITION])))
         if not release:

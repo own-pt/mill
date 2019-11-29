@@ -5,5 +5,6 @@ This tool validates and exports the data found in
 https://github.com/own-pt/own-en/ and
 https://github.com/own-pt/own-pt/.
 
-See the [[https://github.com/own-pt/mill/wiki/][Wiki]] for more information.
+See the [[https://github.com/own-pt/mill/wiki/][Wiki]] for information about installation & configuration, file
+syntax & editing, how to export the data, and how it is validated.
 

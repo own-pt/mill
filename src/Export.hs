@@ -3,7 +3,7 @@ module Export where
 
 import Data ( WNid(..), WNExtra(..), LexicographerFileId(..), SyntacticMarker
             , WordSenseId(..), SynsetId(..), Synset(..), Validated
-            , SynsetRelation(..), WSense(..), WordPointer(..)
+            , SynsetRelation(..), WSense(..), WordPointer(..), RelationName
             , lexicographerFileIdToText, senseKey, singleton, synsetId, synsetType
             , tshow, extraFrames, showId
             , WNPOS(..), unsafeLookup, WordSenseForm(..), LexicalId(..) )
@@ -15,13 +15,13 @@ import qualified Data.ByteString as B
 import Data.ByteString.Builder (Builder,charUtf8)
 import Data.CaseInsensitive ( foldCase )
 import Data.Coerce (coerce)
-import Data.List (findIndex, mapAccumL, nub, sort)
+import Data.List (find, findIndex, mapAccumL, nub, sort)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.ListTrie.Patricia.Map (foldlWithKey', empty, insertWith', lookupPrefix, foldlDescWithKey')
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
@@ -56,21 +56,22 @@ synsetToJSON index textToCanonicNames _
   where
     synsetRel (SynsetRelation name targetId@(SynsetId WNid{lexForm})) =
       object [ "name" .= unsafeLookup ("Can't find relation " ++ T.unpack name) name textToCanonicNames
-             , "targetId" .= targetSynsetId
+             , "targetId" .= showId (coerce targetSynsetId)
              , "_targetLexicalForm" .= lexForm
              ]
       where
         targetSynsetId = synsetId . getSynset index $ coerce targetId
     synsetFrames (WNVerb frames) = ["frames" .= NE.toList frames]
     synsetFrames _ = []
-    toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "id" .= showId wnIdentifier]
+    toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "targetId" .= showId wnIdentifier]
     missingRelation name = "No relation with name " ++ show name ++ " found in relation.tsv"
-    toWordSense (WSense (WordSenseId WNid{lexForm, lexId}) wExtra pointers)
+    toWordSense (WSense (WordSenseId wnid@WNid{lexForm, lexId}) wExtra pointers)
       = object $ concat
       [ if null pointers then [] else ["pointers" .= senseRels]
       , wordExtra wExtra
       , [ "lexicalForm" .= lexForm
         , "lexicalId" .= lexId
+        , "id" .= showId (coerce wnid)
         ]
       ]
       where
@@ -100,7 +101,7 @@ data DBSynset = DBSynset
   , wordSenses           :: NonEmpty (Text, Maybe SyntacticMarker, Int)
   , gloss                :: Text
   , frames               :: [(Int,Int)]
-  , relations            :: [(Text, SynsetId, WNPOS, (Int, Int))]
+  , relations            :: [(RelationName, SynsetId, WNPOS, (Int, Int))]
   } deriving (Show,Eq)
 
 synsetToDB :: Map Text Text -> Map Text Int -> Index (Synset a) -> Synset Validated -> DBSynset
@@ -161,28 +162,34 @@ wnIdentifierToOffset offsetMap wnId = padNum 8 $ M.findWithDefault 0 (indexKey w
 
 showHumanPoS :: WNPOS -> Text
 -- shows S as "a" instead of "s"
+--- despite there being no S anymore I'll keep this here
 showHumanPoS N = "n"
 showHumanPoS V = "v"
-showHumanPoS S = "a"
 showHumanPoS A = "a"
 showHumanPoS R = "r"
 
 -- render a DBSynset; this is done twice for each synset, the first
 -- one has no offset data and is used to calculate it. in the second
 -- run we can use the offsets. this is not optimized at all, but
--- performance seems acceptable, so who cares.
+-- performance seems acceptable, so who cares. this generates the
+-- data.* files.
 showDBSynset :: OffsetMap -> DBSynset -> Text
 showDBSynset offsetMap DBSynset{ _id, lexicographerFileNum, pos, wordSenses, frames, relations, gloss}
   = T.unwords
   [ offsetDoc
   , padNum 2 lexicographerFileNum
-  , showHumanPoS pos
+  -- [] hardcoded
+  , if isSatellite pos then "s" else showHumanPoS pos
   , wordCount
   , T.unwords . NE.toList $ NE.map synsetWord wordSenses
   , T.unwords $ pointerCount : map synsetPointer relations
   , if pos == V then T.unwords $ padNum 2 (length frames) : map synsetFrame frames else ""
   , "|", gloss]
   where
+    isSatellite A
+      = isJust -- [] hardcoded alert
+        $ find (\(relName, _, _, _) -> relName == "similarTo") relations
+    isSatellite _ = False
     pointerCount = padNum 3 $ length relations
     wordCount = paddedHex 2 $ NE.length wordSenses
     idOffset = wnIdentifierToOffset offsetMap
@@ -228,8 +235,8 @@ makeWndbIndex = foldlWithKey' go empty
     go :: String -> Either String a -> WNDBindex a -> WNDBindex a
     go key value = insertWith' (<>) (newKey key) $ singleton value
     newKey key = let (lemma, rest) = break (=='\t') . tail $ dropWhile (/='\t') key
-                     pos = read . take 1 $ drop 1 rest
-                 in concat [show (if pos == S then A else pos), "\t", foldCase lemma]
+                     pos = take 1 $ drop 1 rest
+                 in concat [pos, "\t", foldCase lemma]
 
 
 --- lemma  pos  synset_cnt  p_cnt  [ptr_symbol...]  sense_cnt  tagsense_cnt   synset_offset  [synset_offset...]
@@ -285,13 +292,13 @@ wndbSenseIndex lexicographerMap index offsetMap
         synsetID = coerce $ synsetId synset
         synsetPOS = pos (lexicographerFileId synset :: LexicographerFileId)
         lexFileNum = synsetLexFileNum lexicographerMap synset
-        synsetTypeNum = synsetType synsetPOS
+        synsetTypeNum = synsetType synsetPOS maybeHeadRel
         -- hardcoded ALERT
         isHeadRel (SynsetRelation "sim" _) = True
         isHeadRel _ = False
         maybeHeadRel =
           case synsetPOS of
-            S -> case filter isHeadRel $ Data.relations synset of
+            A -> case filter isHeadRel $ Data.relations synset of
                    [headRel] -> Just headRel
                    _ -> error "No head or more than one head"
             _ -> Nothing

@@ -205,7 +205,6 @@ checkWordSensePointersTargets index = traverse checkWordPointer
 checkExtra :: WNPOS -> WNExtra -> WNValidation WNExtra
 checkExtra _ WNEmpty = Success WNEmpty
 checkExtra A (WNAdj marker) = Success (WNAdj marker)
-checkExtra S (WNAdj marker) = Success (WNAdj marker)
 checkExtra V (WNVerb frames) = fmap WNVerb checkedFrames
   where
     checkedFrames = fmap NE.fromList . checkSortNoDuplicates UnsortedFrames DuplicateFrames $ NE.toList frames

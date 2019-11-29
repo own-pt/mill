@@ -43,20 +43,19 @@ readWNObj input = case input of
 unsafeLookup :: Ord k => String -> k -> Map k a -> a
 unsafeLookup errorMessage = M.findWithDefault $ error errorMessage
 
-data WNPOS = A | S | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Read,Show,ToJSON)
+data WNPOS = A | R | N | V deriving (Binary,Eq,Enum,Generic,Ord,Read,Show,ToJSON)
 
 readShortWNPOS :: (IsString a, Show a, Eq a) => a -> WNPOS
 readShortWNPOS "n" = N
 readShortWNPOS "a" = A
 readShortWNPOS "r" = R
 readShortWNPOS "v" = V
-readShortWNPOS "s" = S
+readShortWNPOS "s" = A
 readShortWNPOS input = error $ show input ++ " is not a valid PoS"
 
 readLongWNPOS :: Text -> Maybe WNPOS
 readLongWNPOS "noun" = Just N
 readLongWNPOS "verb" = Just V
-readLongWNPOS "adjs" = Just S
 readLongWNPOS "adj"  = Just A
 readLongWNPOS "adv"  = Just R
 readLongWNPOS _      = Nothing
@@ -66,7 +65,6 @@ showLongWNPOS N = "noun"
 showLongWNPOS V = "verb"
 showLongWNPOS R = "adv"
 showLongWNPOS A = "adj"
-showLongWNPOS S = "adj"
 
 data LexicographerFileId
   = LexicographerFileId { pos     :: WNPOS
@@ -76,12 +74,14 @@ data LexicographerFileId
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary,ToJSON)
 
-synsetType :: WNPOS -> Int
-synsetType N = 1
-synsetType V = 2
-synsetType A = 3
-synsetType R = 4
-synsetType S = 5
+synsetType :: WNPOS -> Maybe SynsetRelation -> Int
+synsetType N Nothing = 1
+synsetType V Nothing = 2
+synsetType A Nothing = 3
+synsetType R Nothing = 4
+-- [] hardcoded
+synsetType A (Just (SynsetRelation "sim" _)) = 5
+synsetType _ _ = error "Can't have this combination"
 
 lexicographerFileIdToText :: LexicographerFileId -> Text
 lexicographerFileIdToText LexicographerFileId{pos, lexname} =
@@ -90,7 +90,6 @@ lexicographerFileIdToText LexicographerFileId{pos, lexname} =
     posText N = "noun"
     posText V = "verb"
     posText A = "adj"
-    posText S = "adjs"
     posText R = "adv"
 
 newtype WordSenseForm = WordSenseForm Text
@@ -105,6 +104,9 @@ tshow :: Show a => a -> Text
 tshow = T.pack . show
 
 data WNid =
+    -- [] maybe don't separate pos from lexname, and keep them
+    -- together; we can't really tell pos from lexicographer file name
+    -- if we don't separate adjective satellites
   WNid { pos     :: WNPOS
        , lexname :: Text
        , wnName  :: Text
