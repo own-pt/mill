@@ -31,7 +31,7 @@ SYNSETTYPE = {"A" : Literal("AdjectiveSynset"), "N" :
               Literal("VerbSynset")}
 
 COMMENT            = "comment"
-COMMENTS           = "comments"
+COMMENTS           = "_comments"
 DEFINITION         = "definition"
 EXAMPLE            = "example"
 LANG               = "lang"
@@ -43,7 +43,7 @@ CONTAINS_WORDSENSE = "containsWordSense"
 LEXICAL_FORM       = "lexicalForm"
 LEXICAL_ID         = "lexicalId"
 POINTERS           = "pointers"
-POSITION           = "position"
+POSITION           = "_position"
 NAME               = "name"
 SENSEKEY           = "senseKey"
 FRAME              = "frame"
@@ -54,13 +54,15 @@ RELATIONS          = "relations"
 SOURCE_BEGIN       = "sourceBegin"
 SOURCE_END         = "sourceEnd"
 SYNTACTIC_MARKER   = "syntacticMarker"
+TARGET_LEXICAL_FORM = "_targetLexicalForm"
+TARGET = "_target"
 
 CURRENT_LANG=None # initialized during runtime
 
 SYNSET_RELATIONS, WORD_RELATIONS = {}, {}
 
-WN_TARGET = WN30["target"]
-WN_TARGET_LEXICAL_FORM = WN30["targetLexicalForm"]
+WN_TARGET = WN30[TARGET]
+WN_TARGET_LEXICAL_FORM = WN30[TARGET_LEXICAL_FORM]
 WN_FRAME = WN30[FRAME]
 WN_LEXICOGRAPHER_FILE = WN30[LEXICOGRAPHER_FILE]
 WN_LANG = WN30[LANG]
@@ -72,6 +74,7 @@ WN_DEFINITION = WN30[DEFINITION]
 WN_COMMENT = WN30[COMMENT]
 WN_SYNTACTIC_MARKER = WN30[SYNTACTIC_MARKER]
 WN_EXAMPLE = WN30[EXAMPLE]
+RDF_TYPE = RDF.type
 
 ###
 ## rdf -> text
@@ -286,6 +289,12 @@ def print_word_sense(graph, word_sense, lexicographer_file, synset, write):
     print_word_relations()
 
 
+def rdf2text_go(graph, config_dir, output_dir):
+    global SYNSET_RELATIONS, WORD_RELATIONS
+    (SYNSET_RELATIONS, WORD_RELATIONS) = read_config(config_dir)
+    print_graph(graph, output_dir)
+    return None
+
 
 ###
 ## json -> rdf
@@ -293,59 +302,69 @@ def from_json(json_input):
     for line in json_input:
         yield json.loads(line)
 
-def to_graph(synsets_gen):
-    def make_id(lang, lexicographer_file, lexical_form, lexical_id, obj=SYNSET):
-        return WN30_LANG[lang]["{}-{}-{}-{}".format(obj, lexicographer_file,
-                                                    lexical_form, lexical_id)]
+def to_graph(synsets_gen, release=False):
+    def make_id(wn_name, id_str, obj=SYNSET):
+        return WN30_LANG[wn_name]["{}-{}".format(obj, id_str)]
 
-    def parse_id(id_array, obj=SYNSET):
-        [lang, pos, lexname, lexical_form, lexical_id] = id_array
-        lexicographer_file = "{}.{}".format(POS1TOLONG[pos], lexname)
-        obj_id = make_id(lang, lexicographer_file, lexical_form, lexical_id, obj)
-        return lang, obj_id, Literal(lexicographer_file), SYNSETTYPE[pos]
+    def parse_id_wn_name(id_str):
+        # [] this is fragile
+        components = id_str.split("-")
+        return components[0]
 
     def add_relation(head, relation, obj=SYNSET):
-        _, obj_id, _, _ = parse_id(relation[ID], obj)
-        g.add((head, WN30[relation[NAME]], obj_id))
+        target_id_str = relation[ID]
+        target_wn = parse_id_wn_name(target_id_str)
+        target_id = make_id(wn_name, target_id_str, obj)
+        relation_name = WN30[relation[NAME]]
+        if release:
+            g.add((head, relation_name, target_id))
+        else :
+            bnode = BNode()
+            g.add((head, relation_name, bnode))
+            g.add((bnode, WN_TARGET, target_id))
+            target_lexical_form = relation[TARGET_LEXICAL_FORM]
+            g.add((bnode, WN_TARGET_LEXICAL_FORM, target_lexical_form))
 
     def add_frame(head, frame):
         g.add((head, WN_FRAME, Literal(frame)))
 
-    def add_word_sense(lang, wordsense, lexicographer_file, synset_id):
-        wordsense_id = make_id(lang, lexicographer_file, wordsense[LEXICAL_FORM]
-                               , wordsense[LEXICAL_ID], WSENSE)
+    def add_word_sense(wn_name, wordsense, lexicographer_file, synset_id):
+        wordsense_id = make_id(wn_name, wordsense[ID], WSENSE)
         g.add((synset_id, WN30[CONTAINS_WORDSENSE], wordsense_id))
         g.add((wordsense_id, WN30[LEXICAL_ID], Literal(wordsense[LEXICAL_ID])))
         g.add((wordsense_id, WN30[LEXICAL_FORM], Literal(wordsense[LEXICAL_FORM])))
-        g.add((wordsense_id, WN30[SENSEKEY], Literal(wordsense[SENSEKEY])))
         syntacticMarker = wordsense.get(SYNTACTIC_MARKER)
         if syntacticMarker:
             g.add((wordsense_id, WN_SYNTACTIC_MARKER, Literal(syntacticMarker)))
-        for relation in wordsense[POINTERS]:
+        for relation in wordsense.get(POINTERS, []):
             add_relation(wordsense_id, relation, WSENSE)
         frames = wordsense.get(FRAMES, [])
         for frame in frames:
             add_frame(wordsense_id, frame)
 
     def add_synset(synset):
-        lang, synset_id, lexicographer_file, synset_type = parse_id(synset[ID])
-        g.add((synset_id, WN30[LANG], Literal(lang)))
-        g.add((synset_id, RDF.type, synset_type))
+        wn_name = synset["wn"]
+        synset_id = make_id(wn_name, synset[ID], SYNSET)
+        lexicographer_file = Literal(synset[LEXICOGRAPHER_FILE])
+        synset_type = SYNSETTYPE[synset["pos"]]
+        g.add((synset_id, WN30[LANG], Literal(wn_name)))
+        g.add((synset_id, RDF_type, synset_type))
         g.add((synset_id, WN30[LEXICOGRAPHER_FILE], lexicographer_file))
         g.add((synset_id, WN30[DEFINITION], Literal(synset[DEFINITION])))
-        [begin, end] = synset[POSITION]
-        g.add((synset_id, WN30[SOURCE_BEGIN], Literal(begin)))
-        g.add((synset_id, WN30[SOURCE_END], Literal(end)))
-        comments = synset[COMMENTS]
-        if comments:
-            comment = "\n".join(comments)
-            g.add((synset_id, WN30[COMMENT], Literal(comment)))
-        for example in synset[EXAMPLES]:
+        if not release:
+            [begin, end] = synset[POSITION]
+            g.add((synset_id, WN30[SOURCE_BEGIN], Literal(begin)))
+            g.add((synset_id, WN30[SOURCE_END], Literal(end)))
+            comments = synset.get(COMMENTS)
+            if comments:
+                comment = "\n".join(comments)
+                g.add((synset_id, WN30[COMMENT], Literal(comment)))
+        for example in synset.get(EXAMPLES, []):
             g.add((synset_id, WN30[EXAMPLE], Literal(example)))
         for wordsense in synset[WORDSENSES]:
-            add_word_sense(lang, wordsense, lexicographer_file, synset_id),
-        for relation in synset[RELATIONS]:
-            add_relation(synset_id, relation)
+            add_word_sense(wn_name, wordsense, lexicographer_file, synset_id)
+        for relation in synset.get(RELATIONS, []):
+            add_relation(synset_id, relation, SYNSET)
         frames = wordsense.get(FRAMES, [])
         for frame in frames:
             add_frame(synset_id, frame)
@@ -354,12 +373,6 @@ def to_graph(synsets_gen):
     for synset in synsets_gen:
         add_synset(synset)
     return g
-
-def rdf2text_go(graph, config_dir, output_dir):
-    global SYNSET_RELATIONS, WORD_RELATIONS
-    (SYNSET_RELATIONS, WORD_RELATIONS) = read_config(config_dir)
-    print_graph(graph, output_dir)
-    return None
 
 
 ###
@@ -374,9 +387,12 @@ def cli():
 @click.option('-f', '--rdf-format', 'rdf_format'
               , type=click.STRING, default='nt', show_default=True,
               help="RDF output format. Must be accepted by RDFlib.")
-def json2rdf(json_input, rdf_output, rdf_format='nt'):
+@click.option('-r', '--release', 'release'
+              , is_flag=True, default=False, show_default=True,
+              help="output release RDF, which is cleaner but does not allow re-serialization to text")
+def json2rdf(json_input, rdf_output, rdf_format, release):
     """Convert JSON_INPUT to RDF_OUTPUT."""
-    graph = to_graph(from_json(json_input))
+    graph = to_graph(from_json(json_input), release)
     graph.serialize(destination=rdf_output, format=rdf_format)
 
 

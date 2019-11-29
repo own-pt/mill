@@ -37,13 +37,17 @@ uncurry3 f (a,b,c) = f a b c
 synsetToJSON :: Index (Synset a) -> Map Text Text -> Map Text Int
   -> Synset Validated -> Value
 synsetToJSON index textToCanonicNames _
-  Synset{comments, wordSenses = wordSenses@(WSense headWordId@(WordSenseId _) _ _:|_), ..}
+  Synset{comments, wordSenses = wordSenses@(WSense headWordId@(WordSenseId _) _ _:|_)
+        , lexicographerFileId = lexFileId@LexicographerFileId{pos, wnName}, ..}
   = object $ concat
     [ synsetFrames extra
     , if null comments then [] else ["_comments" .= comments]
     , if null examples then [] else ["examples" .= examples]
     , if null relations then [] else ["relations"  .= map synsetRel relations]
     , [ "id"         .= showId (coerce headWordId)
+      , "pos" .= pos
+      , "lexicographerFile" .= lexicographerFileIdToText lexFileId
+      , "wn" .= wnName
       , "wordsenses" .= NE.map toWordSense wordSenses
       , "definition" .= definition
       , "_position"   .= sourcePosition
@@ -51,7 +55,7 @@ synsetToJSON index textToCanonicNames _
     ]
   where
     synsetRel (SynsetRelation name targetId@(SynsetId WNid{lexForm})) =
-      object [ "name" .= name
+      object [ "name" .= unsafeLookup ("Can't find relation " ++ T.unpack name) name textToCanonicNames
              , "targetId" .= targetSynsetId
              , "_targetLexicalForm" .= lexForm
              ]

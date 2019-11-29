@@ -6,7 +6,7 @@
 ## python <this-file>.py --help
 # for options
 
-from mill import WN30, WN_LEXICAL_ID, WN_LEXICOGRAPHER_FILE, WN_LEXICAL_FORM, WN_CONTAINS_WORDSENSE, SYNSET_RELATIONS, WN_TARGET, WN_TARGET_LEXICAL_FORM, WN_LANG, WN_DEFINITION, WN_EXAMPLE, WN_SOURCE_BEGIN, WN_FRAME, SYNSET_RELATIONS
+from mill import WN30, WN_LEXICAL_ID, WN_LEXICOGRAPHER_FILE, WN_LEXICAL_FORM, WN_CONTAINS_WORDSENSE, SYNSET_RELATIONS, WN_TARGET, WN_TARGET_LEXICAL_FORM, WN_LANG, WN_DEFINITION, WN_EXAMPLE, WN_SOURCE_BEGIN, WN_FRAME, SYNSET_RELATIONS, RDF_TYPE
 from mill import sort_synsets, sort_word_senses, rdf2text_go, read_config, summarize
 import rdflib as r
 from rdflib import Graph, Namespace
@@ -22,7 +22,6 @@ WN_SIMILAR_TO = WN30["similarTo"]
 WN_LEMMA = WN30["lemma"]
 WN_WORD = WN30["word"]
 WN_GLOSS = WN30["gloss"]
-RDF_TYPE = RDF.type
 
 def pick_synset_relation_targets(graph, config_dir):
     global SYNSET_RELATIONS
