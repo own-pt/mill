@@ -34,8 +34,8 @@
     (modify-syntax-entry ?@ "w")
     (modify-syntax-entry ?] "w")
     (modify-syntax-entry ?[ "w")
-    ;; comments
-;;; actually comments are only valid at the beginning of synsets
+    ;; comments — actually comments are only valid at the beginning of
+    ;; synsets
     (modify-syntax-entry ?# "<" st)
     (modify-syntax-entry ?\n ">" st)
     st)
@@ -75,14 +75,17 @@
   '("ant" "vg" "drf" "fs"
     "mt" "mr" "mu" "dt"
     "dr" "du" "pv" "pe"
-    "see"))
+    "see" "bmo" "udg" "us"
+    "loc" "bdp" "prp" "evt"
+    "stt" "res" "agt" "it"
+    "mat" "veh" "dst"))
 
 (defconst mill--font-lock-kwds-defs
   `(,(rx-to-string `(: line-start (or ,@mill--kwds-defs) ":"))
     (0 font-lock-keyword-face)))
 
 (defconst mill--font-lock-def-word-and-relations
-  `("^w: +\\(\\sw+ *[0-9]*\\)"
+  `("^w: +\\(\\sw+\\(\\[[0-9]*\\]\\)?\\)"
     (1 font-lock-function-name-face)
     (,(rx-to-string `(: (group (or ,@mill--kwds-word-rel))
 			  (1+ space)
@@ -97,7 +100,7 @@
 (defconst mill--font-lock-synset-relation
   `(,(rx-to-string `(: line-start (or ,@mill--kwds-synset-rel) ":"))
     (0 font-lock-preprocessor-face)
-    ("\\(\\sw+ *[0-9]*\\)"
+    ("\\(\\sw+\\(\\[[0-9]*\\]\\)?\\)"
      (line-end-position)
      nil
      (0 font-lock-constant-face))))
@@ -110,37 +113,31 @@
 (defun mill--xref-backend () 'xref-mill)
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql xref-mill)))
-  (if (or (eq (get-char-property (point) 'face) 'font-lock-function-name-face)
-	  (eq (get-char-property (point) 'face) 'font-lock-constant-face))
-      (let ((beg (previous-single-property-change (point) 'face nil
-						  (line-beginning-position)))
-	    (end (next-single-property-change (point) 'face nil
-					      (line-end-position))))
-	(buffer-substring beg end))))
+  (thing-at-point 'word t))
 
 
 (cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
   (pcase (string-trim identifier)
     ((rx
-      (let maybe-wn (optional "@" (one-or-more (not (any ?:))) ":"))
-      (let maybe-lex-name (optional (or "noun" "adjs" "adj" "adv" "verb")
-				    "."
-				    (one-or-more (not (any ?:)))
-				    ":"))
-      (let lex-form       (one-or-more (not (any ? ))))
-      (optional (1+ space))
-      (let maybe-lex-id   (optional (one-or-more (char digit)))))
-     (let ((lex-file (if (string-empty-p maybe-lex-name)
+      (optional (and "@" (let maybe-wn (one-or-more (not (any ":")))) ":"))
+      (optional (and (let maybe-pos (or "noun" "adj" "adv" "verb"))
+		     "."
+		     (let maybe-lexname (one-or-more (not (any ":"))))
+		     ":"))
+      (let lex-form (one-or-more (not (any "[" "]"))))
+      (optional (and "["
+		     (let maybe-lexical-id (one-or-more (char digit)))
+		     "]")))
+     (let ((lex-file (if (not maybe-lexname)
 			 ;; if wn is specified so must be the lexname,
 			 ;; but not the contrary
 			 (buffer-file-name)
 		       (mill--lexname->file-path
-			(string-trim-right maybe-lex-name ":")
-			(string-trim-right (substring maybe-wn 1) ":"))))
-	   (lex-id (unless (string-empty-p maybe-lex-id) maybe-lex-id)))
+			(concat maybe-pos "." maybe-lexname)
+			maybe-wn))))
        (mill--collect-xref-matches lex-file
 			       lex-form
-			       lex-id)))))
+			       maybe-lexical-id)))))
 
 
 (defun mill--collect-xref-matches (file lexical-form &optional lexical-id)
@@ -148,10 +145,8 @@
     (insert-file-contents file)
     (let ((line 1)
 	  (regexp (if lexical-id
-		      (rx-to-string `(seq line-start "w: " ,lexical-form " " ,lexical-id))
-		    (rx-to-string `(seq line-start "w: " ,lexical-form
-					(or (seq (zero-or-more " ") line-end)
-					    (seq " " (not (any digit))))))))
+		      (rx-to-string `(seq line-start "w: " ,lexical-form "[" ,lexical-id "]"))
+		    (rx-to-string `(seq line-start "w: " ,lexical-form (or whitespace eol)))))
 	  (matches nil))
       (while (not (eobp))
 	(when (looking-at regexp)
@@ -307,7 +302,6 @@ several of these relations are found, the first is used."
     ("noun" "n")
     ("verb" "v")
     ("adj" "a")
-    ("adjs" "s")
     ("adv" "r")))
 
 
