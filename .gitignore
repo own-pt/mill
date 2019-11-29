@@ -2,4 +2,6 @@
 *.cabal
 *~
 *.prof
-**/__pychace/
+**/__pycache__/
+**/venv
+*.lock
