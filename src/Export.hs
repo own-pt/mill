@@ -1,7 +1,7 @@
 {-# LANGUAGE StrictData #-}
 module Export where
 
-import Data ( WNid(..), WNExtra(..), LexicographerFileId(..)
+import Data ( WNid(..), WNExtra(..), LexicographerFileId(..), SyntacticMarker
             , WordSenseId(..), SynsetId(..), Synset(..), Validated
             , SynsetRelation(..), WSense(..), WordPointer(..)
             , lexicographerFileIdToText, senseKey, singleton, synsetId, synsetType
@@ -93,7 +93,7 @@ data DBSynset = DBSynset
   { _id                  :: WNid
   , lexicographerFileNum :: Int
   , pos                  :: WNPOS
-  , wordSenses           :: NonEmpty (Text, Int)
+  , wordSenses           :: NonEmpty (Text, Maybe SyntacticMarker, Int)
   , gloss                :: Text
   , frames               :: [(Int,Int)]
   , relations            :: [(Text, SynsetId, WNPOS, (Int, Int))]
@@ -118,7 +118,9 @@ synsetToDB relationsMap lexicographerMap index
                          ++ concatMap wordRelations (zip [1..] $ NE.toList wordSenses)
            }
   where
-    toWord (WSense (WordSenseId WNid{lexForm = WordSenseForm form,lexId = LexicalId lexicalId}) _ _) = (form, lexicalId)
+    toWord (WSense (WordSenseId WNid{lexForm = WordSenseForm form, lexId = LexicalId lexicalId}) extra' _) = (form, syntacticMarker extra', lexicalId)
+    syntacticMarker (WNAdj sm) = Just sm
+    syntacticMarker _ = Nothing
     synsetRelation (SynsetRelation relationName
                     wnIdentifier@(SynsetId WNid{pos=wnPoS}))
       = ( unsafeLookup ("Missing relation " ++ T.unpack relationName ++ " in relations.tsv") relationName relationsMap
@@ -182,7 +184,11 @@ showDBSynset offsetMap DBSynset{ _id, lexicographerFileNum, pos, wordSenses, fra
     idOffset = wnIdentifierToOffset offsetMap
     offsetDoc = idOffset _id 
     paddedHex n h = padText n . T.pack $ showHex h ""
-    synsetWord (wordForm, lexId) = T.unwords [T.replace " " "_" wordForm, T.pack $ showHex lexId ""]
+    synsetWord (wordForm, Nothing, lexId) = T.unwords [T.replace " " "_" wordForm, T.pack $ showHex lexId ""]
+    synsetWord (wordForm, Just sm, lexId) =
+      T.unwords [T.concat [T.replace " " "_" wordForm
+                          , "(", sm, ")"]
+                , T.pack $ showHex lexId ""]
     synsetPointer (pointerSym, SynsetId targetId, targetPos, (sourceNum,targetNum))
       = T.unwords [ pointerSym, idOffset targetId, showHumanPoS targetPos
                   , paddedHex 2 sourceNum <> paddedHex 2 targetNum ]

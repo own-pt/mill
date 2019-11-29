@@ -155,6 +155,7 @@ newtype SynsetId =
   deriving anyclass (Binary,ToJSON)
   deriving newtype (Pretty)
 
+type SyntacticMarker = Text
 type PointerName = Text
 type RelationName = Text
 data WordPointer = WordPointer PointerName WordSenseId
@@ -188,10 +189,7 @@ newtype SourcePosition = SourcePosition (Int, Int)
   deriving (Eq,Generic,Ord,Show)
   deriving anyclass (Binary,ToJSON)
 
-data SyntacticMarker = Attributive | Predicative | Postnominal
-  deriving (Binary, Eq, Generic, Ord, Show)
-
-data WNExtra = WNEmpty | WNVerb (NonEmpty FrameId) | WNAdj Text
+data WNExtra = WNEmpty | WNVerb (NonEmpty FrameId) | WNAdj SyntacticMarker
   deriving (Binary, Eq, Generic, Ord, Show)
 
 extraFrames :: WNExtra -> [FrameId]
