@@ -9,6 +9,7 @@ module Validate
   , oneLangIndex
   , Index
   , indexKey
+  , getSynset
   , wordSenseKey
   ) where
 
@@ -23,6 +24,7 @@ import Data.Either (either,rights)
 import Data.List hiding (insert, lookup)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
+import Data.Maybe (fromJust) -- irk
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.ListTrie.Base.Map (WrappedIntMap)
@@ -253,3 +255,8 @@ lookupIndex key index =
     Just (Left headKey) -> lookupIndex headKey index
     Just (Right synset) -> Just synset
     Nothing -> Nothing
+
+getSynset :: Index (Synset a) -> WNid -> Synset a
+getSynset index wnid = fromJust $ lookupIndex senseKey index
+  where
+    senseKey = indexKey wnid

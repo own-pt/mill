@@ -1,20 +1,21 @@
 {-# LANGUAGE StrictData #-}
 module Export where
 
-import Data ( WNid(..), WNExtra(..)
+import Data ( WNid(..), WNExtra(..), LexicographerFileId(..)
             , WordSenseId(..), SynsetId(..), Synset(..), Validated
             , SynsetRelation(..), WSense(..), WordPointer(..)
-            , idLexFile, lexicographerFileIdToText, senseKey, singleton, synsetId, synsetType
-            , tshow, extraFrames
+            , lexicographerFileIdToText, senseKey, singleton, synsetId, synsetType
+            , tshow, extraFrames, showId
             , WNPOS(..), unsafeLookup, WordSenseForm(..), LexicalId(..) )
-import Validate (DupsIndex, Index, indexKey, lookupIndex)
+import Validate (DupsIndex, Index, indexKey, lookupIndex, getSynset)
 ---
 import Data.Aeson ( ToJSON(..), fromEncoding, Value
                   , object, (.=) )
 import qualified Data.ByteString as B
 import Data.ByteString.Builder (Builder,charUtf8)
 import Data.CaseInsensitive ( foldCase )
-import Data.List (find, findIndex, mapAccumL, nub)
+import Data.Coerce (coerce)
+import Data.List (findIndex, mapAccumL, nub, sort)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.ListTrie.Patricia.Map (foldlWithKey', empty, insertWith', lookupPrefix, foldlDescWithKey')
@@ -33,51 +34,54 @@ uncurry3 f (a,b,c) = f a b c
 
 ---
 -- JSON/aeson
-synsetToJSON :: Map Text Text -> Map Text Int -> Synset Validated -> Value
-synsetToJSON textToCanonicNames lexNamesToLexNum
-  Synset{comments, wordSenses = wordSenses@(WSense headWordId@(WordSenseId wnId@WNid{pos}) _ _:|_), ..}
-  = object
-    $ synsetFrames extra
-    ++
-    [ "id"         .= headWordId
-    , "wordsenses" .= NE.map toWordSense wordSenses
-    , "definition" .= definition
-    , "examples"   .= examples
-    , "relations"  .= map (\(SynsetRelation name targetIdentifier) -> toRelation name targetIdentifier) relations
-    , "position"   .= sourcePosition
-    , "comments"   .= comments
+synsetToJSON :: Index (Synset a) -> Map Text Text -> Map Text Int
+  -> Synset Validated -> Value
+synsetToJSON index textToCanonicNames _
+  Synset{comments, wordSenses = wordSenses@(WSense headWordId@(WordSenseId _) _ _:|_), ..}
+  = object $ concat
+    [ synsetFrames extra
+    , if null comments then [] else ["_comments" .= comments]
+    , if null examples then [] else ["examples" .= examples]
+    , if null relations then [] else ["relations"  .= map synsetRel relations]
+    , [ "id"         .= showId (coerce headWordId)
+      , "wordsenses" .= NE.map toWordSense wordSenses
+      , "definition" .= definition
+      , "_position"   .= sourcePosition
+      ]
     ]
   where
+    synsetRel (SynsetRelation name targetId@(SynsetId WNid{lexForm})) =
+      object [ "name" .= name
+             , "targetId" .= targetSynsetId
+             , "_targetLexicalForm" .= lexForm
+             ]
+      where
+        targetSynsetId = synsetId . getSynset index $ coerce targetId
     synsetFrames (WNVerb frames) = ["frames" .= NE.toList frames]
     synsetFrames _ = []
-    toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "id" .= wnIdentifier]
+    toRelation name wnIdentifier = object ["name" .= unsafeLookup (missingRelation name) name textToCanonicNames, "id" .= showId wnIdentifier]
     missingRelation name = "No relation with name " ++ show name ++ " found in relation.tsv"
-    toWordSense wordSense@(WSense (WordSenseId WNid{lexForm, lexId}) wExtra pointers)
-      = object $
-        wordExtra wExtra
-        ++ [ "lexicalForm" .= lexForm
-           , "lexicalId" .= lexId
-           , "pointers" .= map (\(WordPointer name targetIdentifier) -> toRelation name targetIdentifier) pointers
-           , "senseKey" .= senseKey lexFileNum (synsetType pos) maybeHeadSynset wordSense
-           ]
+    toWordSense (WSense (WordSenseId WNid{lexForm, lexId}) wExtra pointers)
+      = object $ concat
+      [ if null pointers then [] else ["pointers" .= senseRels]
+      , wordExtra wExtra
+      , [ "lexicalForm" .= lexForm
+        , "lexicalId" .= lexId
+        ]
+      ]
       where
         wordExtra (WNAdj marker)  = ["syntacticMarker" .= marker]
         wordExtra (WNVerb frames) = ["frames" .= NE.toList frames]
         wordExtra _ = []
-    lexfileName  = lexicographerFileIdToText $ idLexFile wnId
-    lexFileNum = unsafeLookup ("No lexfile with name "
-                               ++ show lexfileName ++ "found in lexnames.tsv")
-                 lexfileName lexNamesToLexNum
-    isHeadRelation (SynsetRelation "sim" _) = True
-    isHeadRelation _ = False
-    maybeHeadSynset = case pos of
-      S -> find isHeadRelation relations
-      _ -> Nothing
+        senseRels =
+          map (\(WordPointer name targetIdentifier) -> toRelation name $ coerce targetIdentifier)
+          pointers
 
-synsetsToSynsetJSONs :: Map Text Text -> Map Text Int -> NonEmpty (Synset Validated) -> Builder
-synsetsToSynsetJSONs textToCanonicNames lexNamesToLexNum synsets
+synsetsToSynsetJSONs :: Index (Synset a) -> Map Text Text -> Map Text Int
+  -> NonEmpty (Synset Validated) -> Builder
+synsetsToSynsetJSONs index textToCanonicNames lexNamesToLexNum synsets
   = mconcat . NE.toList . NE.intersperse (charUtf8 '\n')
-  $ NE.map (fromEncoding . toEncoding . synsetToJSON textToCanonicNames lexNamesToLexNum) synsets
+  $ NE.map (fromEncoding . toEncoding . synsetToJSON index textToCanonicNames lexNamesToLexNum) synsets
 
 
 ---
@@ -146,7 +150,7 @@ padText n x = T.append (T.replicate (n - T.length x) "0") x
 padNum :: Int -> Int -> Text
 padNum n m = let x = T.pack $ show m in padText n x
 
-wnIdentifierToOffset :: Map String Int -> WNid -> Text
+wnIdentifierToOffset :: OffsetMap -> WNid -> Text
 wnIdentifierToOffset offsetMap wnId = padNum 8 $ M.findWithDefault 0 (indexKey wnId) offsetMap
 
 showHumanPoS :: WNPOS -> Text
@@ -161,7 +165,7 @@ showHumanPoS R = "r"
 -- one has no offset data and is used to calculate it. in the second
 -- run we can use the offsets. this is not optimized at all, but
 -- performance seems acceptable, so who cares.
-showDBSynset :: Map String Int -> DBSynset -> Text
+showDBSynset :: OffsetMap -> DBSynset -> Text
 showDBSynset offsetMap DBSynset{ _id, lexicographerFileNum, pos, wordSenses, frames, relations, gloss}
   = T.unwords
   [ offsetDoc
@@ -187,8 +191,8 @@ showDBSynset offsetMap DBSynset{ _id, lexicographerFileNum, pos, wordSenses, fra
 newline :: Text
 newline = "\n"
 
-calculateOffsets :: Int -> Map String Int -> Map Text Text -> Map Text Int -> Index (Synset a) -> NonEmpty (Synset Validated)
-  -> (Map String Int, NonEmpty DBSynset)
+calculateOffsets :: Int -> OffsetMap -> Map Text Text -> Map Text Int -> Index (Synset a) -> NonEmpty (Synset Validated)
+  -> (OffsetMap, NonEmpty DBSynset)
 calculateOffsets startOffset startOffsetMap relationsMap lexicographerMap index synsets
   = (\((offsetMap, _), dbSynsets) -> (offsetMap, dbSynsets)) $ mapAccumL go (startOffsetMap, startOffset) synsets
   where
@@ -201,15 +205,17 @@ calculateOffsets startOffset startOffsetMap relationsMap lexicographerMap index 
          , dbSynset
          )
 
+type WNDBindex a = DupsIndex a
+type OffsetMap = Map String Int
 
 -- this depends heavily on the indexkey
-makeIndexIndex :: Index a -> DupsIndex a
+makeWndbIndex :: Index a -> WNDBindex a
 -- make index for index* files (which see
 -- https://wordnet.princeton.edu/documentation/wndb5wn) contain case
 -- insensitive lemmas
-makeIndexIndex = foldlWithKey' go empty
+makeWndbIndex = foldlWithKey' go empty
   where
-    go :: String -> Either String a -> DupsIndex a -> DupsIndex a
+    go :: String -> Either String a -> WNDBindex a -> WNDBindex a
     go key value = insertWith' (<>) (newKey key) $ singleton value
     newKey key = let (lemma, rest) = break (=='\t') . tail $ dropWhile (/='\t') key
                      pos = read . take 1 $ drop 1 rest
@@ -217,8 +223,8 @@ makeIndexIndex = foldlWithKey' go empty
 
 
 --- lemma  pos  synset_cnt  p_cnt  [ptr_symbol...]  sense_cnt  tagsense_cnt   synset_offset  [synset_offset...]
-showIndex :: WNPOS -> Map Text Text -> Map String Int -> Index (Synset a) -> DupsIndex (Synset a) -> [Text]
-showIndex wnPos relationsLexName offsetMap index indexIndex = foldlDescWithKey' go [] posIndex
+showIndex :: WNPOS -> Map Text Text -> OffsetMap -> Index (Synset a) -> DupsIndex (Synset a) -> [Text]
+showIndex wnPos relationsLexName offsetMap index wndbIndex = foldlDescWithKey' go [] posIndex
   where
     go key synsetsOrRefs resultSoFar = line key synsetsOrRefs : resultSoFar
     line key synsetsOrRefs =
@@ -245,5 +251,45 @@ showIndex wnPos relationsLexName offsetMap index indexIndex = foldlDescWithKey' 
     toSynset (Left headKey)
       = fromMaybe (error $ "Missing key " ++ headKey ++ " in index") $ lookupIndex headKey index
     toSynset (Right synset) = synset
-    posIndex = lookupPrefix (T.unpack $ T.toUpper pos) indexIndex
+    posIndex = lookupPrefix (T.unpack $ T.toUpper pos) wndbIndex
     pos = showHumanPoS wnPos
+
+synsetLexFileNum :: Map Text Int -> Synset a -> Int
+synsetLexFileNum lexMap Synset{lexicographerFileId}
+  =
+  let lexname = lexicographerFileIdToText lexicographerFileId
+  in unsafeLookup
+     ("Missing lexicographer name " ++ T.unpack lexname ++ " in lexnames.tsv")
+     lexname
+     lexMap
+
+wndbSenseIndex :: Map Text Int -> Index (Synset a) -> OffsetMap -> [Text]
+wndbSenseIndex lexicographerMap index offsetMap
+  = sort $ foldlDescWithKey' go [] index
+  where
+    go _ (Left _) resultSoFar = resultSoFar
+    go _ (Right synset@Synset{wordSenses}) resultSoFar =
+      zipWith line (NE.toList wordSenses) ([1..] :: [Int])
+      ++ resultSoFar
+      where
+        synsetID = coerce $ synsetId synset
+        synsetPOS = pos (lexicographerFileId synset :: LexicographerFileId)
+        lexFileNum = synsetLexFileNum lexicographerMap synset
+        synsetTypeNum = synsetType synsetPOS
+        -- hardcoded ALERT
+        isHeadRel (SynsetRelation "sim" _) = True
+        isHeadRel _ = False
+        maybeHeadRel =
+          case synsetPOS of
+            S -> case filter isHeadRel $ Data.relations synset of
+                   [headRel] -> Just headRel
+                   _ -> error "No head or more than one head"
+            _ -> Nothing
+        line sense n =
+          T.unwords [ T.pack sensekey -- sensekey
+                    , wnIdentifierToOffset offsetMap synsetID -- offset
+                    , tshow n -- sense number (faked)
+                    , "0" -- FIXME: count tags of sense in corpus
+                    ]
+          where
+            sensekey = senseKey lexFileNum synsetTypeNum maybeHeadRel sense

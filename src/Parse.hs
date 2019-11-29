@@ -20,7 +20,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
-import Text.Megaparsec hiding (State)
+import Text.Megaparsec hiding (State, token)
 import Text.Megaparsec.Char (char, eol)
 import qualified Text.Megaparsec.Char.Lexer as L
 --import Text.Megaparsec.Debug (dbg)
@@ -197,7 +197,7 @@ wordSenseStatement = statement "w" go
       <*> (wordSenseFrames <|> wordSenseMarker <|> emptyExtra)
       <*> wordSensePointers
     wordSenseFrames = fmap WNVerb $ symbol "fs" *> frameNumbers
-    wordSenseMarker = fmap WNAdj $ symbol "marker" *> word
+    wordSenseMarker = fmap WNAdj $ symbol "marker" *> token
 
 wordSenseIdentifier :: Parser WordSenseId
 wordSenseIdentifier = WordSenseId . toWNid <$> identifier
@@ -206,24 +206,27 @@ identifier :: Parser (LexicographerFileId, WordSenseForm, LexicalId)
 identifier =
   (,,)
   <$>  (try lexicographerIdentifier <|> reader fst3)
-  <*>  fmap WordSenseForm word <*> lexicalIdentifier
+  <*>  fmap WordSenseForm senseWord <*> (LexicalId <$> option 0 lexicalIdentifier)
   where
     lexicographerIdentifier = do
       wnName <- wnNameR
       lexicographerIdP wnName <* char ':'
+    lexicalIdentifier =
+      symbol "[" *> (integer <?> "Lexical Identifier") <* symbol "]"
 
 wordSensePointers :: Parser [WordPointer]
 wordSensePointers = many go
   where
     go =  WordPointer
-      <$> relationNameP WordObj (word <?> "Word pointer")
+      <$> relationNameP WordObj (token <?> "Word pointer")
       <*> wordSenseIdentifier
 
-word :: Parser Text
-word = lexeme $ takeWhile1P Nothing (not . isSpace)
+token :: Parser Text
+token = lexeme $ takeWhile1P Nothing (not . isSpace)
 
-lexicalIdentifier :: Parser LexicalId
-lexicalIdentifier = LexicalId <$> option 0 (integer <?> "Lexical Identifier")
+senseWord :: Parser Text
+senseWord = lexeme $ takeWhile1P (Just "sense word")
+  (not . (\c -> isSpace c || c `elem` ['[', ']']))
 
 framesStatement :: Parser (NonEmpty FrameId)
 framesStatement = statement "fs" frameNumbers

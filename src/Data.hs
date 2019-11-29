@@ -10,6 +10,7 @@ module Data where
 import Data.Aeson ( ToJSON(..) )
 import Data.Bifunctor (Bifunctor(..))
 import Data.Binary (Binary)
+import Data.CaseInsensitive ( foldCase )
 import Data.Coerce (coerce)
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
@@ -120,9 +121,15 @@ instance Pretty WNid where
     <>  pretty lexForm
     <+> pretty lexId
 
+showId :: WNid -> Text
+showId WNid{pos,lexname,wnName,lexForm,lexId = LexicalId lexicalId}
+    = T.intercalate "-" [wnName, lexfile, coerce lexForm, tshow lexicalId]
+    where
+      lexfile = lexicographerFileIdToText $ LexicographerFileId{pos, lexname, wnName}
+
 instance ToJSON WNid where
-  toJSON WNid{pos,lexname,wnName,lexForm,lexId}
-    = toJSON (wnName, pos, lexname, lexForm, lexId)
+  toJSON WNid{pos,lexname,wnName,lexForm,lexId} =
+    toJSON (wnName, pos, lexname, lexForm, lexId)
 
 
 toWNid :: (LexicographerFileId, WordSenseForm, LexicalId) -> WNid
@@ -167,7 +174,7 @@ senseKey lexFileNum synsetTypeNum maybeHeadRelation
   wordSense@(WSense (WordSenseId WNid{lexForm = WordSenseForm wordForm,lexId = LexicalId lexicalId}) _ _)
   = printf "%s%%%d:%02d:%02d:%s:%s" lemma synsetTypeNum lexFileNum lexicalId headWordForm (headWordLexicalId :: String)
   where
-    lemma = T.toLower wordForm
+    lemma = foldCase wordForm
     (headWordForm, headWordLexicalId) =
       case (synsetTypeNum, maybeHeadRelation) of
         (5, Just (SynsetRelation _
