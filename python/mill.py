@@ -7,7 +7,6 @@ from rdflib import Graph, Namespace, BNode
 from rdflib.namespace import RDF
 from rdflib.term import Literal
 import click
-from itertools import chain
 
 ###
 ## constants
@@ -20,44 +19,44 @@ from itertools import chain
 
 WN30 = Namespace("https://w3id.org/own-pt/wn30/schema/")
 WN30EN = Namespace("https://w3id.org/own-pt/wn30-en/instances/")
-WN30PT = Namespace("https://w3id.org/own-pt/wn30-pt/instances/") # not used (yet)
+WN30PT = Namespace("https://w3id.org/own-pt/wn30-pt/instances/")
 
 WN30_LANG = {"en": WN30EN, "pt": WN30PT}
 
-POS1TOLONG = {"A" : "adj", "N" : "noun", "R" : "adv", "S" : "adjs", "V" : "verb"}
-SYNSETTYPE = {"A" : Literal("AdjectiveSynset"), "N" :
-              Literal("NounSynset"), "R" : Literal("AdverbSynset"),
-              "S" : Literal("AdjectiveSatelliteSynset"), "V" :
+POS1TOLONG = {"A": "adj", "N": "noun", "R": "adv", "S": "adjs", "V": "verb"}
+SYNSETTYPE = {"A": Literal("AdjectiveSynset"), "N":
+              Literal("NounSynset"), "R": Literal("AdverbSynset"),
+              "S": Literal("AdjectiveSatelliteSynset"), "V":
               Literal("VerbSynset")}
 
-COMMENT            = "comment"
-COMMENTS           = "_comments"
-DEFINITION         = "definition"
-EXAMPLE            = "example"
-LANG               = "lang"
+COMMENT = "comment"
+COMMENTS = "_comments"
+DEFINITION = "definition"
+EXAMPLE = "example"
+LANG = "lang"
 LEXICOGRAPHER_FILE = "lexicographerFile"
-ID                 = "id"
-EXAMPLES           = "examples"
-WORDSENSES         = "wordsenses"
+ID = "id"
+EXAMPLES = "examples"
+WORDSENSES = "wordsenses"
 CONTAINS_WORDSENSE = "containsWordSense"
-LEXICAL_FORM       = "lexicalForm"
-LEXICAL_ID         = "lexicalId"
-POINTERS           = "pointers"
-POSITION           = "_position"
-NAME               = "name"
-SENSEKEY           = "senseKey"
-FRAME              = "frame"
-FRAMES             = "frames"
-WSENSE             = "wordsense"
-SYNSET             = "synset"
-RELATIONS          = "relations"
-SOURCE_BEGIN       = "sourceBegin"
-SOURCE_END         = "sourceEnd"
-SYNTACTIC_MARKER   = "syntacticMarker"
+LEXICAL_FORM = "lexicalForm"
+LEXICAL_ID = "lexicalId"
+POINTERS = "pointers"
+POSITION = "_position"
+NAME = "name"
+SENSEKEY = "senseKey"
+FRAME = "frame"
+FRAMES = "frames"
+WSENSE = "wordsense"
+SYNSET = "synset"
+RELATIONS = "relations"
+SOURCE_BEGIN = "sourceBegin"
+SOURCE_END = "sourceEnd"
+SYNTACTIC_MARKER = "syntacticMarker"
 TARGET_LEXICAL_FORM = "_targetLexicalForm"
 TARGET = "_target"
 
-CURRENT_LANG=None # initialized during runtime
+CURRENT_LANG = None  # initialized during runtime
 
 SYNSET_RELATIONS, WORD_RELATIONS = {}, {}
 
@@ -75,6 +74,7 @@ WN_COMMENT = WN30[COMMENT]
 WN_SYNTACTIC_MARKER = WN30[SYNTACTIC_MARKER]
 WN_EXAMPLE = WN30[EXAMPLE]
 RDF_TYPE = RDF.type
+
 
 ###
 ## rdf -> text
@@ -118,6 +118,7 @@ def read_config(config_dir):
         config_dir, "relations.tsv"), read_relations, ({}, {}))
     return (synset_relations, word_relations)
 
+
 def summarize(graph, node):
     # for debugging
     print(node)
@@ -129,10 +130,11 @@ def summarize(graph, node):
         print("    {} {}".format(subj, r.namespace.split_uri(pred)[1]))
     return None
 
+
 def print_graph(graph, output_dir):
     global CURRENT_LANG
     lex_files = set(graph.objects(predicate=WN_LEXICOGRAPHER_FILE))
-    langs     = set(graph.objects(predicate=WN_LANG))
+    langs = set(graph.objects(predicate=WN_LANG))
     for lang in langs:
         CURRENT_LANG = lang
         lang_output_dir = os.path.join(output_dir, lang)
@@ -302,8 +304,10 @@ def from_json(json_input):
     for line in json_input:
         yield json.loads(line)
 
+
 def to_graph(synsets_gen, release=False):
     from urllib.parse import quote
+
     def make_id(wn_name, id_str, obj=SYNSET):
         return WN30_LANG[wn_name][quote("{}-{}".format(obj, id_str))]
 
@@ -385,11 +389,11 @@ def cli():
 @cli.command()
 @click.argument('json_input', type=click.File(mode="r"), required=True)
 @click.argument('rdf_output', type=click.File(mode="wb"), required=True)
-@click.option('-f', '--rdf-format', 'rdf_format'
-              , type=click.STRING, default='nt', show_default=True,
+@click.option('-f', '--rdf-format', 'rdf_format',
+              type=click.STRING, default='nt', show_default=True,
               help="RDF output format. Must be accepted by RDFlib.")
-@click.option('-r', '--release', 'release'
-              , is_flag=True, default=False, show_default=True,
+@click.option('-r', '--release', 'release',
+              is_flag=True, default=False, show_default=True,
               help="output release RDF, which is cleaner but does not allow re-serialization to text")
 def json2rdf(json_input, rdf_output, rdf_format, release):
     """Convert JSON_INPUT to RDF_OUTPUT."""
@@ -401,11 +405,13 @@ def json2rdf(json_input, rdf_output, rdf_format, release):
 @click.argument('rdf_input',
                 type=click.File(mode="rb"), required=True)
 @click.argument('config_dir',
-                type=click.Path(exists=True, file_okay=False, resolve_path=True), required=True)
-@click.argument('output_dir'
-                , type=click.Path(file_okay=False, resolve_path=True, writable=True), required=True)
-@click.option('-f', '--rdf-file-format', 'rdf_file_format'
-              , type=click.STRING, default='nt', show_default=True,
+                type=click.Path(exists=True, file_okay=False,
+                                resolve_path=True), required=True)
+@click.argument('output_dir',
+                type=click.Path(file_okay=False, resolve_path=True,
+                                writable=True), required=True)
+@click.option('-f', '--rdf-file-format', 'rdf_file_format',
+              type=click.STRING, default='nt', show_default=True,
               help="RDF input format. Must be accepted by RDFlib.")
 def rdf2text(rdf_input, config_dir, output_dir, rdf_file_format="nt"):
     """Convert RDF_INPUT to lexicographer files placed at OUTPUT_DIR,
@@ -419,9 +425,11 @@ according to the configuration files in CONFIG_DIR."""
 @click.argument('json_input',
                 type=click.File(mode="rb"), required=True)
 @click.argument('config_dir',
-                type=click.Path(exists=True, file_okay=False, resolve_path=True), required=True)
-@click.argument('output_dir'
-                , type=click.Path(file_okay=False, resolve_path=True, writable=True), required=True)
+                type=click.Path(exists=True, file_okay=False, resolve_path=True),
+                required=True)
+@click.argument('output_dir',
+                type=click.Path(file_okay=False, resolve_path=True, writable=True),
+                required=True)
 def json2text(json_input, config_dir, output_dir):
     """Convert JSON_INPUT to lexicographer files placed at OUTPUT_DIR,
 according to the configuration files in CONFIG_DIR."""
