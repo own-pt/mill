@@ -172,9 +172,9 @@ def print_lexfile(graph, lexicographer_file, output_dir):
 
 def word_sense_id(graph, lexicographer_file, word_sense, synset=None):
     synset = synset or graph.value(predicate=WN_CONTAINS_WORDSENSE, object=word_sense)
-    lexical_form = graph.value(word_sense, WN_LEXICAL_FORM)
-    lexical_id = graph.value(word_sense, WN_LEXICAL_ID)
-    in_lang = graph.value(synset, WN_LANG)
+    lexical_form = graph.value(word_sense, WN_LEXICAL_FORM, any=False)
+    lexical_id = graph.value(word_sense, WN_LEXICAL_ID, any=False)
+    in_lang = graph.value(synset, WN_LANG, any=False)
     assert in_lang, word_sense
     assert lexical_form, word_sense
     assert lexical_id, word_sense
@@ -303,8 +303,9 @@ def from_json(json_input):
         yield json.loads(line)
 
 def to_graph(synsets_gen, release=False):
+    from urllib.parse import quote
     def make_id(wn_name, id_str, obj=SYNSET):
-        return WN30_LANG[wn_name]["{}-{}".format(obj, id_str)]
+        return quote(WN30_LANG[wn_name]["{}-{}".format(obj, id_str)])
 
     def parse_id_wn_name(id_str):
         # [] this is fragile
@@ -318,7 +319,7 @@ def to_graph(synsets_gen, release=False):
         relation_name = WN30[relation[NAME]]
         if release or obj == WSENSE:
             g.add((head, relation_name, target_id))
-        else :
+        else:
             bnode = BNode()
             g.add((head, relation_name, bnode))
             g.add((bnode, WN_TARGET, target_id))
