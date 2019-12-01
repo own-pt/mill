@@ -177,7 +177,7 @@ def word_sense_id(graph, lexicographer_file, word_sense, synset=None):
     in_lang = graph.value(synset, WN_LANG, any=False)
     assert in_lang, word_sense
     assert lexical_form, word_sense
-    assert lexical_id, word_sense
+    assert lexical_id is not None, word_sense
     return (in_lang, lexicographer_file, lexical_form, int(lexical_id))
 
 
@@ -305,7 +305,7 @@ def from_json(json_input):
 def to_graph(synsets_gen, release=False):
     from urllib.parse import quote
     def make_id(wn_name, id_str, obj=SYNSET):
-        return quote(WN30_LANG[wn_name]["{}-{}".format(obj, id_str)])
+        return WN30_LANG[wn_name][quote("{}-{}".format(obj, id_str))]
 
     def parse_id_wn_name(id_str):
         # [] this is fragile
@@ -366,7 +366,7 @@ def to_graph(synsets_gen, release=False):
             add_word_sense(wn_name, wordsense, lexicographer_file, synset_id)
         for relation in synset.get(RELATIONS, []):
             add_relation(synset_id, relation, SYNSET)
-        frames = wordsense.get(FRAMES, [])
+        frames = synset.get(FRAMES, [])
         for frame in frames:
             add_frame(synset_id, frame)
     #
