@@ -238,7 +238,9 @@ lineText :: Parser Text
 lineText = T.stripEnd <$> takeWhileP Nothing (/= '\n')
 
 textBlock :: Parser Text
-textBlock = T.unwords <$> lineText `sepBy1` try (eol *> some (char ' '))
+-- unlines includes trailing newline, which we do not want
+textBlock = T.intercalate "\n   "
+  <$> lineText `sepBy1` try (eol *> some (char ' '))
 
 linebreak :: Parser ()
 linebreak = void $ lexeme eol

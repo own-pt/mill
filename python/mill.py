@@ -415,5 +415,19 @@ according to the configuration files in CONFIG_DIR."""
     rdf2text_go(graph, config_dir, output_dir)
 
 
+@cli.command()
+@click.argument('json_input',
+                type=click.File(mode="rb"), required=True)
+@click.argument('config_dir',
+                type=click.Path(exists=True, file_okay=False, resolve_path=True), required=True)
+@click.argument('output_dir'
+                , type=click.Path(file_okay=False, resolve_path=True, writable=True), required=True)
+def json2text(json_input, config_dir, output_dir):
+    """Convert JSON_INPUT to lexicographer files placed at OUTPUT_DIR,
+according to the configuration files in CONFIG_DIR."""
+    graph = to_graph(from_json(json_input))
+    rdf2text_go(graph, config_dir, output_dir)
+
+
 if __name__ == '__main__':
     cli()

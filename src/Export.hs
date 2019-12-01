@@ -37,7 +37,7 @@ uncurry3 f (a,b,c) = f a b c
 synsetToJSON :: Index (Synset a) -> Map Text Text -> Map Text Int
   -> Synset Validated -> Value
 synsetToJSON index textToCanonicNames _
-  Synset{comments, wordSenses = wordSenses@(WSense headWordId@(WordSenseId _) _ _:|_)
+  Synset{wordSenses = wordSenses@(WSense headWordId@(WordSenseId _) _ _:|_)
         , lexicographerFileId = lexFileId@LexicographerFileId{pos, wnName}, ..}
   = object $ concat
     [ synsetFrames extra
@@ -114,15 +114,17 @@ synsetToDB relationsMap lexicographerMap index
                                        lexname
                                        lexicographerMap
            , pos = pos
-           , wordSenses = NE.map toWord wordSenses -- FIXME: add syntactic marker
-           , gloss = T.intercalate "; " (definition
-                                         : map (\e -> T.cons '"' $ T.snoc e '"') examples)
+           , wordSenses = NE.map toWord wordSenses
+           , gloss = gloss
            , frames = map synsetFrame (extraFrames extra)
                     ++ concatMap toWordFrames (zip [1..] $ NE.toList wordSenses)
            , relations = map synsetRelation relations
                          ++ concatMap wordRelations (zip [1..] $ NE.toList wordSenses)
            }
   where
+    gloss = T.replace "\n" " "
+      $ T.intercalate "; " (definition
+                             : map (\e -> T.cons '"' $ T.snoc e '"') examples)
     toWord (WSense (WordSenseId WNid{lexForm = WordSenseForm form, lexId = LexicalId lexicalId}) extra' _) = (form, syntacticMarker extra', lexicalId)
     syntacticMarker (WNAdj sm) = Just sm
     syntacticMarker _ = Nothing
