@@ -1,6 +1,5 @@
 .stack-work/
 *.cabal
-*~
 *.prof
 **/__pycache__/
 **/venv

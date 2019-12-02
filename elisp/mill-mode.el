@@ -1,27 +1,23 @@
-;;; mill-mode.el --- editing mode for edit wordnet data in human-readable text format files  -*- lexical-binding: t; -*-
+;;; mill-mode.el — editing mode for edit wordnet data in human-readable text format files  -*- lexical-binding: t; -*-
 
 ;; dependencies
 
-(require 'seq)
-(require 'rx)
 (require 'map)
 (require 'pcase)
+(require 'rx)
+(require 'seq)
+(require 'subr-x)
 (require 'xref)
+(require 'mill-custom)
 (require 'mill-flymake)
-
-;; customizable variables
-
-(defcustom mill--configuration-directory nil
-  "Path to directory where wordnet configuration files reside in, or `nil'."
-  :group 'mill
-  :type '(choice file (const nil)))
 
 ;; variables
 
 (defvar mill-inter-wordnet-relations '("sa" "su" "sb")
-  "These relations are used by `mill-display-related-synset' to
-  display the definition of a synset related to the one at
-  point.")
+  "List inter-WordNet relations.
+
+These relations are used by `mill-display-related-synset' to
+display the definition of a synset related to the one at point.")
 
 (defvar mill-mode-syntax-table
   (let ((st (make-syntax-table)))
@@ -32,8 +28,8 @@
     (modify-syntax-entry ?_ "w")
     (modify-syntax-entry ?' "w")
     (modify-syntax-entry ?@ "w")
-    (modify-syntax-entry ?] "w")
-    (modify-syntax-entry ?[ "w")
+    (modify-syntax-entry (string-to-char "]") "w")
+    (modify-syntax-entry (string-to-char "[") "w")
     ;; comments — actually comments are only valid at the beginning of
     ;; synsets
     (modify-syntax-entry ?# "<" st)
@@ -219,7 +215,7 @@ several of these relations are found, the first is used."
 (defun mill--configuration-file (filename)
   (let* ((current-directory-path (expand-file-name filename))
 	 (configuration-file-path (expand-file-name filename
-						    mill--configuration-directory)))
+						    mill-configuration-directory)))
 
     (cond
      ((file-exists-p current-directory-path)
@@ -228,7 +224,7 @@ several of these relations are found, the first is used."
       configuration-file-path)
      (t
       (user-error
-       "Can't find configuration file %s, try setting variable `mill--configuration-directory'"
+       "Can't find configuration file %s, try setting variable `mill-configuration-directory'"
        filename)))))
 
 
@@ -256,9 +252,9 @@ several of these relations are found, the first is used."
 
 
 (defun mill--lexname->file-path (lexname &optional wn)
-  "Given LEXNAME and possibly a WN, return the relative file path of specified lexicographer file"
+  "Given LEXNAME and possibly a WN, return the relative file path of specified lexicographer file."
   (if wn
-      (let* ((lines (mill--read-tsv (mill--configuration-file mill--wns-config-file-name)))
+      (let* ((lines (mill--read-tsv (mill--configuration-file mill-wns-config-file-name)))
 	     (wn->directory-map (mapcar (mill-λ (`(,wn-name ,rel-dir)) (cons wn-name rel-dir))
 					lines))
 	     (wn-dir (map-elt wn->directory-map wn nil #'equal)))
@@ -404,3 +400,4 @@ See URL `https://github.com/own-pt/mill/'."
   (setq-local indent-line-function 'mill--indent-line))
 
 (provide 'mill-mode)
+;;; mill-mode ends here
