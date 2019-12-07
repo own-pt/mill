@@ -153,7 +153,103 @@ display the definition of a synset related to the one at point.")
 	(cl-incf line))
       (nreverse matches))))
 
+;;; autocompletion
 
+(defun mill--matches-in-file (regexp &optional buffer)
+  "Return a list of matches of REGEXP in BUFFER.
+
+If BUFFER is not given, use the current buffer."
+  (let ((matches))
+    (save-match-data
+      (with-current-buffer (or buffer (current-buffer))
+        (save-excursion
+          (save-restriction
+            (widen)
+            (goto-char 1)
+            (while (search-forward-regexp regexp nil t 1)
+              (push (match-string-no-properties 1) matches)))))
+      matches)))
+
+
+(defun mill--sense-completions-here (to-complete lexfile &optional prefix)
+  "Get completions of sense TO-COMPLETE in LEXFILE.
+
+If prefix is non-nil, concatenate it to each completion before
+returning."
+  (let* (
+;; FIXME: this is controversial — using find-file is not usually
+;; recommended because it runs hooks and syntax-highlighting and in
+;; this case the user didn't even ask for it. but if we open it
+;; literally we might end up with two copies of it if the user
+;; eventually opens it. if we open and close the buffer we do a lot of
+;; work that might have to be redone. there seems to be no simple
+;; solution here…
+	 (buffer (or (get-buffer lexfile) (find-file-noselect lexfile t)))
+	 (matches
+	  (mill--matches-in-file
+	   (rx-to-string
+	    `(and line-start "w:" (one-or-more " ")
+		  (group ,to-complete
+			 (zero-or-more (not (any " " "\n"))))))
+	   buffer)))
+    (if prefix
+	(mapcar (mill-λ (match) (concat prefix match)) matches)
+      matches)))
+
+
+(defun mill--lexfile-prefixes ()
+  "Show all possible lexfile prefixes for lexicographer files.
+
+Used by `mill--sense-completions' to complete lexfile prefixes."
+  (let* ((lexnames-path (mill--configuration-file mill-lexnames-config-file-name))
+	 (lexname-lines (mill--read-tsv lexnames-path))
+	 (lexnames (mapcar #'cl-second lexname-lines))
+	 (wn-lines (mill--read-tsv (mill--configuration-file mill-wns-config-file-name)))
+	 (wn-names (mapcar #'cl-first wn-lines)))
+    (seq-mapcat (mill-λ (lexname)
+		  (cons (concat lexname ":")
+			;; FIXME: no need to include current WN
+			;;; FIXME: can't assume that every wordnet has
+			;;; the same lexnames
+			(mapcar (mill-λ (wn-name) (concat "@" wn-name ":" lexname ":"))
+				wn-names)))
+		lexnames)))
+
+
+(defun mill--sense-completions (to-complete &optional buffer)
+  (pcase to-complete
+    ((rx (and (optional "@" (let maybe-wn-name (one-or-more (not (any ":")))) ":")
+	      (let pos (or "noun" "adj" "adv" "verb")) "."
+	      (let lexname (one-or-more (not (any ":")))) ":"
+	      (let to-complete (zero-or-more (not (any " " "\n"))))))
+     ;; pick correct lexfile
+     (let ((lexfile (mill--lexname->file-path (concat pos "." lexname) maybe-wn-name)))
+       ;; call function recursively
+       (mill--sense-completions-here to-complete
+				 lexfile
+				 (concat (if maybe-wn-name
+					     (concat "@" maybe-wn-name ":")
+					   "")
+					 pos "." lexname ":"))))
+    (_	     ; could either be completions in this buffer or elsewhere
+     (append
+      ;; add lexnames up front since `completion-table-dynamic' will
+      ;; only show them if they match
+      (mill--lexfile-prefixes)
+      ;; add completions of this buffer
+      (mill--sense-completions-here to-complete (current-buffer))))))
+
+
+(defun mill--complete-sense-at-point ()
+  (interactive)
+  (cl-destructuring-bind (beg . end)
+      (bounds-of-thing-at-point 'symbol)
+    (list beg
+	  end
+	  (completion-table-with-cache #'mill--sense-completions))))
+
+
+;;; Utils
 (defun mill-display-related-synset ()
   "Display definition of related synset synset in another window.
 
@@ -398,6 +494,8 @@ See URL `https://github.com/own-pt/mill/'."
   (setq-local comment-end "")
   ;; xref
   (add-hook 'xref-backend-functions #'mill--xref-backend nil t)
+  ;; completion
+  (add-hook 'completion-at-point-functions #'mill--complete-sense-at-point nil t)
   ;; indentation
   (setq-local indent-line-function 'mill--indent-line))
 
