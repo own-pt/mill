@@ -21,15 +21,15 @@ display the definition of a synset related to the one at point.")
 
 (defvar mill-mode-syntax-table
   (let ((st (make-syntax-table)))
-    ;; word components
-    (modify-syntax-entry ?. "w")
-    (modify-syntax-entry ?: "w")
-    (modify-syntax-entry ?- "w")
-    (modify-syntax-entry ?_ "w")
-    (modify-syntax-entry ?' "w")
-    (modify-syntax-entry ?@ "w")
-    (modify-syntax-entry (string-to-char "]") "w")
-    (modify-syntax-entry (string-to-char "[") "w")
+    ;; symbol components; these are used to name senses and synsets
+    (modify-syntax-entry ?. "_" st)
+    (modify-syntax-entry ?: "_" st)
+    (modify-syntax-entry ?- "_" st)
+    (modify-syntax-entry ?_ "_" st)
+    (modify-syntax-entry ?' "_" st)
+    (modify-syntax-entry ?@ "_" st)
+    (modify-syntax-entry (string-to-char "]") "_" st)
+    (modify-syntax-entry (string-to-char "[") "_" st)
     ;; comments — actually comments are only valid at the beginning of
     ;; synsets
     (modify-syntax-entry ?# "<" st)
@@ -109,7 +109,7 @@ display the definition of a synset related to the one at point.")
 (defun mill--xref-backend () 'xref-mill)
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql xref-mill)))
-  (thing-at-point 'word t))
+  (thing-at-point 'symbol t))
 
 
 (cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
@@ -143,7 +143,7 @@ display the definition of a synset related to the one at point.")
 	  (regexp (if lexical-id
 		      (rx-to-string `(seq line-start "w: " ,lexical-form "[" ,lexical-id "]"))
 		    (rx-to-string `(seq line-start "w: " ,lexical-form (or whitespace eol)))))
-	  (matches nil))
+	  (matches))
       (while (not (eobp))
 	(when (looking-at regexp)
 	  (push (xref-make (thing-at-point 'line)
@@ -266,6 +266,7 @@ several of these relations are found, the first is used."
 
 
 (defun mill--setup-tabulated-list-mode (buffer-name format entries)
+  ;; used for picking new frame or relation
   (let ((buffer (generate-new-buffer buffer-name)))
     (with-current-buffer buffer
       (setq-local tabulated-list-format format)
