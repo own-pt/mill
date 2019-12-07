@@ -3,6 +3,7 @@
 (defcustom mill-configuration-directory nil
   "Path to directory where wordnet configuration files reside in, or nil."
   :group 'mill
+  :safe t
   :type '(choice file (const nil)))
 
 (defcustom mill-validate-one-wordnet nil
@@ -10,6 +11,7 @@
 validation. String value should be the one found in the
 configuration file wns.tsv."
   :group 'mill
+  :safe t
   :type '(choice string (const nil)))
 
 (provide 'mill-custom)
