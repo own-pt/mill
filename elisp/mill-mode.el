@@ -231,18 +231,19 @@ several of these relations are found, the first is used."
 (defun mill--read-tsv (filepath)
   (cl-labels
       ((read-line ()
-		  (let* ((line (thing-at-point 'line t))
-			 (fields (split-string line "\t" nil "[ \f\n\r\v]+")))
-		    (pcase fields
-		      (`(,singleton)
-		       (unless (or (equal (substring singleton 0 2) "--")
-				   (string-empty-p singleton))
-			 fields))
-		      (_ fields)))))
+		  (unless (looking-at "[[:space:]]*$") ; empty line
+		    (let* ((line (thing-at-point 'line t))
+			   (fields (split-string line "\t" nil "[ \f\n\r\v]+")))
+		      (pcase fields
+			(`(,singleton)
+			 (unless (or (equal (substring singleton 0 2) "--")
+				     (string-empty-p singleton))
+			   fields))
+			(_ fields))))))
     (with-temp-buffer
       (insert-file-contents filepath)
       (goto-char (point-max))
-      (let ((result nil))
+      (let ((result))
 	(while (not (bobp))
 	  (let ((fields (read-line)))
 	    (when fields
@@ -255,7 +256,7 @@ several of these relations are found, the first is used."
   "Given LEXNAME and possibly a WN, return the relative file path of specified lexicographer file."
   (if wn
       (let* ((lines (mill--read-tsv (mill--configuration-file mill-wns-config-file-name)))
-	     (wn->directory-map (mapcar (mill-λ (`(,wn-name ,rel-dir)) (cons wn-name rel-dir))
+	     (wn->directory-map (mapcar (mill-λ (`(,wn-name ,rel-dir . ,_)) (cons wn-name rel-dir))
 					lines))
 	     (wn-dir (map-elt wn->directory-map wn nil #'equal)))
 	(unless wn-dir
@@ -284,7 +285,7 @@ several of these relations are found, the first is used."
 
 (cl-defun mill--read-relations (filepath &key obj pos)
   (let* ((relations (mill--read-tsv filepath))
-	 (rel-filter (mill-λ (`(,name ,_ ,code ,_ ,rel-pos ,rel-domain ,description))
+	 (rel-filter (mill-λ (`(,name ,_ ,code ,_ ,rel-pos ,rel-domain ,description . ,_))
 		       (when (and (not (string= code "_"))
 				  (or (not pos)
 				      (member pos (split-string rel-pos "," t)))
