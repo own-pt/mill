@@ -31,7 +31,7 @@ display the definition of a synset related to the one at point.")
     (modify-syntax-entry (string-to-char "]") "_" st)
     (modify-syntax-entry (string-to-char "[") "_" st)
     ;; comments — actually comments are only valid at the beginning of
-    ;; synsets
+    ;; synsets, but oh well…
     (modify-syntax-entry ?# "<" st)
     (modify-syntax-entry ?\n ">" st)
     st)
@@ -53,6 +53,7 @@ display the definition of a synset related to the one at point.")
 
 
 ;;; fontification
+;; https://web.archive.org/web/20161029181403/http://www.lunaryorn.com/posts/search-based-fontification-with-keywords.html
 
 (defconst mill--kwds-defs
   '("w" "d" "e")
@@ -77,29 +78,39 @@ display the definition of a synset related to the one at point.")
     "mat" "veh" "dst"))
 
 (defconst mill--font-lock-kwds-defs
-  `(,(rx-to-string `(: line-start (or ,@mill--kwds-defs) ":"))
+  `(,(rx-to-string
+      ;; must use rx-to-string because quasiquote breaks rx macro, and
+      ;; regexp-opt can't work with it either (if you use eval, it
+      ;; escapes the output string, rendering the regexp useless) —
+      ;; plus or becomes regexp-opt anyway… the only downside is that
+      ;; the quasiquoting prevents bytecompilation
+      `(and line-start (or ,@mill--kwds-defs) ":") t)
     (0 font-lock-keyword-face)))
 
 (defconst mill--font-lock-def-word-and-relations
-  `("^w: +\\(\\sw+\\(\\[[0-9]*\\]\\)?\\)"
+  `(,(rx line-start "w:" (one-or-more space)
+	 (group (one-or-more (or (syntax word) (syntax symbol)))))
     (1 font-lock-function-name-face)
-    (,(rx-to-string `(: (group (or ,@mill--kwds-word-rel))
-			  (1+ space)
-			  (group word-start (one-or-more word) word-end
-				 (0+ space)
-				 (0+ digit))))
+    (,(rx-to-string
+       `(and (group (or ,@mill--kwds-word-rel))
+	     (one-or-more space)
+	     (group word-start
+		    (one-or-more (or (syntax word)
+				     (syntax symbol)))))
+       t)
      (line-end-position)
      nil
      (1 font-lock-variable-name-face)
      (2 font-lock-constant-face))))
 
 (defconst mill--font-lock-synset-relation
-  `(,(rx-to-string `(: line-start (or ,@mill--kwds-synset-rel) ":"))
+  `(,(rx-to-string `(and line-start (or ,@mill--kwds-synset-rel) ":") t)
     (0 font-lock-preprocessor-face)
-    ("\\(\\sw+\\(\\[[0-9]*\\]\\)?\\)"
+    (,(rx (group (one-or-more (or (syntax word)
+				  (syntax symbol)))))
      (line-end-position)
      nil
-     (0 font-lock-constant-face))))
+     (1 font-lock-constant-face))))
 
 
 (defalias 'mill-λ #'pcase-lambda)
