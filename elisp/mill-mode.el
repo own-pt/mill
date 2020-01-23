@@ -37,6 +37,9 @@ display the definition of a synset related to the one at point.")
     st)
   "Syntax table for ‘mill-mode’.")
 
+(defvar mill--references-buffer-name "*mill-%s-references*"
+  "Name of buffer where references are displayed at.")
+
 ;; constants
 
 (defconst mill-frames-file-name
@@ -123,7 +126,7 @@ display the definition of a synset related to the one at point.")
   (thing-at-point 'symbol t))
 
 
-(cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
+(defun mill--parse-identifier (identifier)
   (pcase (string-trim identifier)
     ((rx
       (optional (and "@" (let maybe-wn (one-or-more (not (any ":")))) ":"))
@@ -142,9 +145,14 @@ display the definition of a synset related to the one at point.")
 		       (mill--lexname->file-path
 			(concat maybe-pos "." maybe-lexname)
 			maybe-wn))))
-       (mill--collect-xref-matches lex-file
-			       lex-form
-			       maybe-lexical-id)))))
+       (list maybe-wn lex-file lex-form maybe-lexical-id)))))
+
+
+(cl-defmethod xref-backend-definitions ((_backend (eql xref-mill)) identifier)
+  (seq-let (_ lex-file lex-form maybe-lexical-id) (mill--parse-identifier identifier)
+    (mill--collect-xref-matches lex-file
+			    lex-form
+			    maybe-lexical-id)))
 
 
 (defun mill--collect-xref-matches (file lexical-form &optional lexical-id)
@@ -163,6 +171,65 @@ display the definition of a synset related to the one at point.")
 	(forward-line 1)
 	(cl-incf line))
       (nreverse matches))))
+
+(defun mill--grep-sentinel (f)
+  "Create sentinel to used by `make-process' call of grep executable.
+
+Call FUNCTION if the underlying grep process finishes
+normally (exit codes 0 and 1), else raise an error."
+  (lambda (process event-str)
+    (pcase event-str
+      ((or "finished\n"			       ; found something
+	   "exited abnormally with code 1\n")  ; found nothing
+       (funcall f))
+      (_				       ; errored
+       (error "Process %s %s" process event-str)))))
+
+
+(defun mill-references (identifier)
+  "Collect references to IDENTIFIER."
+  (interactive (list (thing-at-point 'symbol t)))
+  (seq-let (maybe-wn lex-file lex-form maybe-lex-id) (mill--parse-identifier identifier)
+    (let ((wn (or maybe-wn (cl-first (mill--wordnet-names))))
+	  (local-identifier (if maybe-lex-id
+				(format "%s[%s]" lex-form maybe-lex-id)
+			      lex-form)))
+      (mill--collect-references local-identifier lex-file wn))))
+
+(defun mill--collect-references (identifier lexicographer-file wn-name)
+  (let* ((lexfile-paths (mill--lexicographer-file-paths))
+	 (quoted-identifier (regexp-quote identifier))
+	 (other-lexfile-paths (seq-difference lexfile-paths (list lexicographer-file)))
+	 (qualified-identifier (regexp-quote (format "%s:%s" (file-name-nondirectory lexicographer-file) identifier)))
+	 (buffer (format mill--references-buffer-name identifier))
+	 (finish-sentinel (mill--grep-sentinel
+			   (mill-λ ()
+			     (with-current-buffer buffer
+			       (goto-char (point-min))
+			       ;; remove example and definition lines:
+			       (delete-matching-lines "^[^:]+:[ed]:")
+			       (delete-matching-lines (format "^[^:]+:w: *%s" quoted-identifier))
+			       (grep-mode))
+			     (display-buffer buffer))))
+	 (collect-sentinel (mill--grep-sentinel
+			    (mill-λ ()
+			      (make-process :name "mill--other-files-references"
+					    :command (cl-list* "grep" "--color" "-nH" "--null"
+							       "-e" (format "\\(@%s\\)\\?%s\\([[:space:]]\\|$\\)" wn-name qualified-identifier)
+							       other-lexfile-paths)
+					    :buffer buffer
+					    :sentinel finish-sentinel)))))
+    ;; clean up buffer
+    (when (get-buffer buffer)
+      (with-current-buffer buffer
+	(read-only-mode -1)
+	(erase-buffer)))
+    ;; call grep
+    (make-process :name "mill--same-file-references"
+		  :buffer buffer
+		  :command (list "grep" "--color" "-nH" "--null"
+				 "-e" (format "[[:space:]:]%s\\([[:space:]]\\|$\\)" quoted-identifier) lexicographer-file)
+		  :sentinel collect-sentinel)))
 
 ;;; autocompletion
 
@@ -208,26 +275,52 @@ returning."
       matches)))
 
 
+(defun mill--lexnames ()
+  (let* ((lexnames-path (mill--configuration-file mill-lexnames-config-file-name))
+	 (lexname-lines (mill--read-tsv lexnames-path))
+	 (lexnames (mapcar #'cl-second lexname-lines)))
+    lexnames))
+
+
+(defun mill--wordnet-names ()
+  (let ((wn-lines (mill--read-tsv (mill--configuration-file mill-wns-config-file-name))))
+    (mapcar #'cl-first wn-lines)))
+
+
+(defun mill--other-wordnet-names ()
+  ;; Assumes first wn listed is the main one.
+  (cl-rest (mill--wordnet-names)))
+
+
+(defun mill--lexicographer-file-paths ()
+  (let* ((lexnames (mill--lexnames))
+	 (this-wn-paths (mapcar #'mill--lexname->file-path lexnames))
+	 (other-wns (mill--other-wordnet-names))
+	 (these-wn-paths (seq-mapcat (mill-λ (wn-name)
+				       (mapcar (mill-λ (lexname) (mill--lexname->file-path lexname wn-name))
+					       lexnames))
+				     other-wns)))
+    (if (null other-wns)
+	this-wn-paths
+      (append this-wn-paths these-wn-paths))))
+
+
 (defun mill--lexfile-prefixes ()
   "Show all possible lexfile prefixes for lexicographer files.
 
 Used by `mill--sense-completions' to complete lexfile prefixes."
-  (let* ((lexnames-path (mill--configuration-file mill-lexnames-config-file-name))
-	 (lexname-lines (mill--read-tsv lexnames-path))
-	 (lexnames (mapcar #'cl-second lexname-lines))
-	 (wn-lines (mill--read-tsv (mill--configuration-file mill-wns-config-file-name)))
-	 (wn-names (mapcar #'cl-first wn-lines)))
+  (let* ((lexnames (mill--lexnames))
+	 (wn-names (mill--other-wordnet-names)))
     (seq-mapcat (mill-λ (lexname)
 		  (cons (concat lexname ":")
-			;; FIXME: no need to include current WN
-			;;; FIXME: can't assume that every wordnet has
-			;;; the same lexnames
+			;; FIXME: can't assume that every wordnet has
+			;; the same lexnames
 			(mapcar (mill-λ (wn-name) (concat "@" wn-name ":" lexname ":"))
 				wn-names)))
 		lexnames)))
 
 
-(defun mill--sense-completions (to-complete &optional buffer)
+(defun mill--sense-completions (to-complete &optional _buffer)
   (pcase to-complete
     ((rx (and (optional "@" (let maybe-wn-name (one-or-more (not (any ":")))) ":")
 	      (let pos (or "noun" "adj" "adv" "verb")) "."
@@ -447,7 +540,7 @@ Press RET or click to insert frame number at point."
   (interactive)
   (let* ((original-buffer (current-buffer))
 	 (format [("Number" 7 t) ("Template" 0 t)])
-	 (frames (mill--read-frames (mill--configuration-file mill--frames-file-name)))
+	 (frames (mill--read-frames (mill--configuration-file mill-frames-file-name)))
 	 (frame-to-entry (mill-λ (`(,n ,template))
 			   (list n
 				 (vector
@@ -479,6 +572,11 @@ Press RET or click to insert frame number at point."
 ;;       (mill--new-wordsense-relation)
 ;;     (mill--new-synset-relation)))
 
+(defvar mill-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "M-?") #'mill-references)
+    map)
+  "Keymap for `mill-mode'.")
 
 ;;;###autoload
 (define-derived-mode mill-mode fundamental-mode "mill"
