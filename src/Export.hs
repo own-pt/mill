@@ -302,7 +302,8 @@ wndbSenseIndex lexicographerMap index offsetMap
           case synsetPOS of
             A -> case filter isHeadRel $ Data.relations synset of
                    [headRel] -> Just headRel
-                   _ -> error "No head or more than one head"
+                   [] -> Nothing
+                   _ -> error $ "More than one head synset in synset " ++ T.unpack (showId synsetID)
             _ -> Nothing
         line sense n =
           T.unwords [ T.pack sensekey -- sensekey
