@@ -354,7 +354,8 @@ def fixes_to_legacy_rdf(graph, config_dir, sense_map_file):
               help="RDF input format. Must be accepted by RDFlib.")
 def main(rdf_input, config_dir, output_dir, sense_map_file, rdf_file_format):
     """Convert RDF_INPUT to lexicographer files placed at OUTPUT_DIR,
-according to the configuration files in CONFIG_DIR."""
+according to the configuration files in CONFIG_DIR. Produces sense map
+file that is saved to SENSE_MAP_FILE."""
     graph = Graph()
     graph.parse(rdf_input, format=rdf_file_format)
     add_wn_name(graph, EN)
