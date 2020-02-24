@@ -295,8 +295,10 @@ wndbSenseIndex lexicographerMap index offsetMap
         synsetPOS = pos (lexicographerFileId synset :: LexicographerFileId)
         lexFileNum = synsetLexFileNum lexicographerMap synset
         synsetTypeNum = synsetType synsetPOS maybeHeadRel
-        -- hardcoded ALERT
-        isHeadRel (SynsetRelation "sim" _) = True
+        -- hardcoded ALERT (satellite synsets which are characterized
+        -- by the presence of satelliteOf -- so -- relation are
+        -- treated differently
+        isHeadRel (SynsetRelation "so" _) = True
         isHeadRel _ = False
         maybeHeadRel =
           case synsetPOS of

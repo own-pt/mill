@@ -23,6 +23,15 @@ WN_LEMMA = WN30["lemma"]
 WN_WORD = WN30["word"]
 WN_GLOSS = WN30["gloss"]
 
+def pick_head(graph, synset):
+    # try to pick sense with lexical id of zero (for easier to
+    # read files)
+    sorted_senses = sort_word_senses(graph, synset)
+    for sense in sorted_senses:
+        if graph.value(sense, WN_LEXICAL_ID).eq("0"):
+            return sense
+    return sorted_senses[0]
+
 def pick_synset_relation_targets(graph, config_dir):
     global SYNSET_RELATIONS
     WN_HEAD_SENSE = WN30["headSense"]
@@ -30,16 +39,8 @@ def pick_synset_relation_targets(graph, config_dir):
     # bootstraping phase we pick preferentially senses that have
     # lexical id of zero, or the first in sort order
     def pick_synset_heads():
-        def pick_head(synset):
-            # try to pick sense with lexical id of zero (for easier to
-            # read files)
-            sorted_senses = sort_word_senses(graph, synset)
-            for sense in sorted_senses:
-                if graph.value(sense, WN_LEXICAL_ID).eq("0"):
-                    return sense
-            return sorted_senses[0]
         for synset in graph.subjects(WN_LEXICOGRAPHER_FILE):
-            head_sense = pick_head(synset)
+            head_sense = pick_head(graph, synset)
             graph.add((synset, WN_HEAD_SENSE, head_sense))
         return None
     #

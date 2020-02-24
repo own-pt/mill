@@ -65,7 +65,7 @@ display the definition of a synset related to the one at point.")
 (defconst mill--kwds-synset-rel
   (append mill-inter-wordnet-relations
 	  '("hm" "hp" "hs" "vg" "mm" "fs"
-	    "mp" "ms" "sim" "entail"
+	    "mp" "ms" "sim" "so" "entail"
 	    "drf" "mt" "mr" "mu" "dt"
 	    "dr" "du" "attr" "cause"
 	    "hyper" "ihyper" "see"

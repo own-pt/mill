@@ -80,8 +80,8 @@ synsetType V Nothing = 2
 synsetType A Nothing = 3
 synsetType R Nothing = 4
 -- [] hardcoded
-synsetType A (Just (SynsetRelation "sim" _)) = 5
-synsetType _ _ = error "Can't have this combination"
+synsetType A (Just (SynsetRelation "so" _)) = 5
+synsetType _ _ = error "Can't have this POS/relation combination"
 
 lexicographerFileIdToText :: LexicographerFileId -> Text
 lexicographerFileIdToText LexicographerFileId{pos, lexname} =
