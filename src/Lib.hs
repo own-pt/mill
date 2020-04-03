@@ -1,22 +1,25 @@
 module Lib
-    ( Config(..)
-    , canonicalDir
-    , parseLexicographerFile
-    , parseLexicographerFiles
-    , build
-    , validateLexicographerFile
-    , validateLexicographerFiles
-    , lexicographerFilesJSON
-    , readConfig
-    , toWNDB
+    (
+      App,
+      Config(..),
+      build,
+      canonicalDir,
+      hoist,
+      lexicographerFilesJSON,
+      parseLexicographerFile,
+      parseLexicographerFiles,
+      readConfig,
+      toWNDB,
+      validateLexicographerFile,
+      validateLexicographerFiles,
+      wnLexFiles,
     ) where
 
 import Data ( Synset(..), Unvalidated, Validated
             , Validation(..), SourceValidation, singleton
             , SourceError(..), WNError(..), SourcePosition(..)
             , WNObj(..), readWNObj, WNPOS(..), readShortWNPOS
-            , showLongWNPOS, synsetPOS, unsafeLookup
-            , validate, validation )
+            , showLongWNPOS, synsetPOS, validate, validation )
 import Export ( DBSynset(..), calculateOffsets, makeWndbIndex, newline
               , showDBSynset, showIndex, synsetsToSynsetJSONs, wndbSenseIndex )
 import Parse (parseLexicographer)
@@ -24,17 +27,19 @@ import Validate ( makeIndex, Index, indexSynsets, oneLangIndex
                 , validateSynsets, checkIndexNoDuplicates )
 ----------------------------------
 --import Debug.Trace (trace)
-import Control.Monad (unless,mapM)
-import Control.Monad.Reader (ReaderT(..), ask, liftIO)
+import Control.Monad (foldM, mapM, unless)
+import Control.Monad.RWS (RWST(..), ask, get, liftIO, mapRWST, put)
 import Data.Bifunctor (Bifunctor(..))
-import Data.Binary (encodeFile,decodeFileOrFail)
+import Data.Binary (encodeFile, decodeFileOrFail)
 import Data.ByteString.Builder (hPutBuilder)
+import Data.Functor.Identity (Identity(..))
 import Data.Either (partitionEithers)
-import Data.List (intercalate, find, intersperse)
+import Data.List (intercalate, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
 import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -42,13 +47,14 @@ import qualified Data.Text.IO as TIO
 import Data.Text.Prettyprint.Doc (Pretty(..))
 import Data.Text.Prettyprint.Doc.Render.Text (putDoc)
 import qualified Data.Text.Read as TR
+import Data.Time.Calendar ()
+import Data.Time.Clock (UTCTime(..))
 import Data.Traversable (mapAccumL)
-import Development.Shake ( shake, ShakeOptions(..), shakeOptions
-                         , need, want, (%>) )
-import Development.Shake.FilePath ((<.>), (-<.>), splitFileName, takeDirectory)
-import System.Directory ( canonicalizePath, doesDirectoryExist, createDirectoryIfMissing
-                        , doesDirectoryExist, doesPathExist, withCurrentDirectory )
-import System.FilePath ((</>), normalise, equalFilePath)
+import System.Directory ( canonicalizePath, doesDirectoryExist
+                        , createDirectoryIfMissing, getModificationTime
+                        , doesDirectoryExist, doesFileExist
+                        , doesPathExist, withCurrentDirectory )
+import System.FilePath ((</>), (<.>), normalise, equalFilePath, splitFileName, takeDirectory)
 import System.IO (BufferMode(..),withFile, IOMode(..),hSetBinaryMode,hSetBuffering)
 
 
@@ -59,13 +65,13 @@ data Config = Config
   { -- | Only consider WordNet of name
     oneLang :: Maybe Text
   -- | contains the filepaths to the directory of each WordNet
-  , wnPaths :: Map Text FilePath
+  , wnPaths :: [(Text, FilePath)]
   -- | maps lexicographer filenames to their numerical ids
-  , lexnamesToId       :: Map Text Int
+  , lexnamesToId :: Map Text Int
   -- | maps relation names in text files to their canonical names
   , textToCanonicNames :: Map Text Text
   -- | maps canonic relation names to their possible domains
-  , canonicToDomain    :: Map Text (NonEmpty WNObj, NonEmpty WNPOS)
+  , canonicToDomain :: Map Text (NonEmpty WNObj, NonEmpty WNPOS)
   -- | maps relation names in text files to their (original)
   -- lexicographer file names/symbols
   , textToLexRelations :: Map Text Text
@@ -80,7 +86,7 @@ readTSV readLine input =
   case go input of
     ([], x:xs) -> sconcat (x:|xs)
     ([], []) -> error "No contents"
-    (errors, _) -> error $ unlines errors 
+    (errors, _) -> error $ unlines errors
   where
     go = partitionEithers
       . map readLine -- read contents
@@ -98,7 +104,7 @@ canonicalDir filepath' = do
   unless pathExists (error $ "Path " ++  filepath' ++ " does not exist")
   isDirectory <- doesDirectoryExist filepath
   return $ if isDirectory then filepath else takeDirectory filepath
-  
+
 
 readConfig :: Maybe Text -> FilePath -> FilePath -> IO Config
 readConfig oneLang wnPath configurationDir = do
@@ -110,7 +116,7 @@ readConfig oneLang wnPath configurationDir = do
       textToCanonicNames = toMap toTextToCanonicName relationsInput
       canonicToDomain    = toMap toCanonicToDomain relationsInput
       textToLexRelations = toMap toTextToLexRelations relationsInput
-      wnPaths            = toMap id $ zip wnNames wnAbsolutePaths
+      wnPaths            = zip wnNames wnAbsolutePaths
   return $ Config { oneLang, lexnamesToId, textToCanonicNames
                   , canonicToDomain, textToLexRelations
                   , mainWNDir = wnPath, wnPaths
@@ -139,33 +145,50 @@ readConfig oneLang wnPath configurationDir = do
     wnsReader [wnName, relativePath, _] = Right [(wnName, relativePath)]
     wnsReader _ = Left "Wrong number of fiels in wns.tsv"
     readListField f = NE.fromList . map (f . T.strip) . T.splitOn ","
-                                                                 
 
-type App = ReaderT Config IO
+type BuildData = Maybe (NonEmpty (FilePath, UTCTime))
+--data AppState = AppState {Index (Synset Validated)}
+--- app state : files and timestamps, synset index, index relations
+--- and reverse
+
+--type WN = Index (Synset Validated)
+
+type App' = RWST Config () BuildData
+type App = App' IO
+type AppI = App' Identity
+
+unsafeAssoc :: Eq a => String -> a -> [(a,b)] -> b
+unsafeAssoc errorMsg key = fromMaybe (error errorMsg) . lookup key
+
+unsafeRassoc :: Eq b => String -> b -> [(a,b)] -> a
+unsafeRassoc errorMsg key = fromMaybe (error errorMsg) . rlookup key
+  where
+    rlookup _key []          =  Nothing
+    rlookup  k ((x,y):xys)
+        | k == y          =  Just x
+        | otherwise       =  rlookup k xys
 
 
-wnLexFiles :: App (NonEmpty (Text, FilePath))
+wnLexFiles :: AppI (NonEmpty (Text, FilePath))
 wnLexFiles = do
   Config{wnPaths, oneLang, lexnamesToId} <- ask
   case oneLang of
     Just wnName -> return $ go lexnamesToId $ wnPath wnPaths wnName
-    Nothing     -> return . sconcat . NE.fromList . map (go lexnamesToId . wnPath wnPaths) $ M.keys wnPaths
+    Nothing     -> return . sconcat . NE.fromList . map (go lexnamesToId . wnPath wnPaths) $ map fst wnPaths
   where
     wnPath wnPaths wnName = ( wnName
-                            , unsafeLookup ("No wordnet named " ++ T.unpack wnName) wnName wnPaths
+                            , unsafeAssoc ("No wordnet named " ++ T.unpack wnName) wnName wnPaths
                             )
     go lexnamesToId (wnName, wnDirPath) = NE.fromList . map (\lexname -> (wnName, wnDirPath </> T.unpack lexname)) $ M.keys lexnamesToId
 
-wnFilePaths :: App (NonEmpty FilePath)
+wnFilePaths :: AppI (NonEmpty FilePath)
 wnFilePaths = NE.map snd <$> wnLexFiles
 
 parseLexicographerFile :: Text -> FilePath -> App (SourceValidation (NonEmpty (Synset Unvalidated)))
 parseLexicographerFile wnName filePath = do
   Config{textToCanonicNames, canonicToDomain} <- ask
-  liftIO $ do
-    content <- TIO.readFile $ normalise filePath
-    let result = parseLexicographer textToCanonicNames canonicToDomain wnName filePath content
-    return result
+  content <- liftIO . TIO.readFile $ normalise filePath
+  return $ parseLexicographer textToCanonicNames canonicToDomain wnName filePath content
 
 parseLexicographerFiles :: NonEmpty (Text, FilePath)
   -> App (SourceValidation (NonEmpty (Synset Validated)))
@@ -183,21 +206,24 @@ lexicographerFilesJSON outputFile = do
   result <- getValidated
   case result of
     Failure errors -> liftIO $ prettyPrintList errors
-    Success (index, synsets) -> let jsonBuilder = synsetsToSynsetJSONs index textToCanonicNames lexnamesToId synsets
-                            in liftIO
-                               $ withFile outputFile WriteMode (`write` jsonBuilder) 
+    Success (index, synsets) ->
+      let jsonBuilder = synsetsToSynsetJSONs index textToCanonicNames lexnamesToId synsets
+      in liftIO $ withFile outputFile WriteMode (`write` jsonBuilder)
   where
     write handle builder = do
       _ <- handle `hSetBinaryMode` True
       _ <- handle `hSetBuffering` BlockBuffering Nothing
       handle `hPutBuilder` builder
-  
+
 
 prettyPrintList :: Pretty a => NonEmpty a -> IO ()
 prettyPrintList = mapM_ (putDoc . pretty)
 
+hoist :: AppI a -> App a
+hoist = mapRWST (return.runIdentity)
+
 buildFiles :: App (NonEmpty FilePath)
-buildFiles = build *> wnFilePaths
+buildFiles = build *> hoist wnFilePaths
 
 getValidated :: App (SourceValidation (Index (Synset Unvalidated), NonEmpty (Synset Validated)))
 -- | validate all lexicographer files and return the synset index and
@@ -233,11 +259,10 @@ validateLexicographerFile filePath = do
   Config{oneLang} <- ask
   normalFilePath <- liftIO $ canonicalizePath filePath
   lexFilePaths <- buildFiles
-  liftIO $
-    case NE.partition (equalFilePath normalFilePath) lexFilePaths of
-      ([_], otherFilePaths) -> liftIO $ go oneLang normalFilePath otherFilePaths
-      ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
-      _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
+  liftIO $ case NE.partition (equalFilePath normalFilePath) lexFilePaths of
+    ([_], otherFilePaths) -> go oneLang normalFilePath otherFilePaths
+    ([], _) -> putStrLn $ "File " ++ normalFilePath ++ " is not specified in lexnames.tsv"
+    _       -> putStrLn $ "File " ++ normalFilePath ++ " is doubly specified in lexnames.tsv"
   where
     go oneLang fileToValidate lexFilePaths = do
       validationTargetFileIndex <- readCachedFileIndex oneLang fileToValidate
@@ -288,35 +313,41 @@ readCachedFileIndex oneLang lexFilePath = do
 -- cache
 build :: App ()
 build = do
-  config@Config{mainWNDir} <- ask
-  lexFiles <- wnLexFiles
-  let shakeDir = mainWNDir </> ".cache"
-  liftIO . shake shakeOptions{ shakeFiles=shakeDir, shakeThreads=0 }
-    $ do
-    -- targets
-    want . map (cachePath . snd) $ NE.toList lexFiles
-    -- rules
-    "//.cache/*.index" %> \out -> do
-        let (dirPath, fileName) = splitFileName $ out -<.> ""
-            lexFilePath         = let dir = takeDirectory $ takeDirectory dirPath
-                                  in dir </> fileName
-            maybeLexFilePath = find ((==) lexFilePath . snd) lexFiles
-        case maybeLexFilePath of
-          Nothing -> fail $ lexFilePath ++ " not in lexnames.tsv"
-          Just (wnName, _) -> do
-            need [lexFilePath]
-            liftIO $ runReaderT (cacheFileIndex wnName lexFilePath out) config
-   where
-     cachePath path =
-       let (dirPath, fileName) = splitFileName path
-       in dirPath </> ".cache" </> fileName <.> "index"
-     cacheFileIndex :: Text -> FilePath -> FilePath -> App ()
-     cacheFileIndex wnName lexFilePath outFilePath = do
-       result <- parseLexicographerFile wnName lexFilePath
-       let validIndex = bimap id makeIndex result
-       -- valid index has no duplicates, but may have invalid synsets
-       liftIO . encodeFile outFilePath
-         $ validate checkIndexNoDuplicates validIndex
+  maybeBuildData <- get
+  buildData <- case maybeBuildData :: Maybe (NonEmpty (FilePath, UTCTime)) of
+    Nothing -> hoist wnFilePaths >>= liftIO . mapM getBuildData
+    Just buildData -> return buildData
+  (toUpdate, buildData') <- liftIO . foldM update ([], []) $ NE.toList buildData
+  put . Just $ NE.fromList buildData'
+  mapM_ cacheFileIndex toUpdate
+  where
+    getBuildData fp = do
+      let cacheFilePath = cachePath fp
+      fileExists <- doesFileExist cacheFilePath
+      (fp,) <$>
+        if fileExists
+        then getModificationTime cacheFilePath
+        else return $ UTCTime (toEnum 0) (toEnum 0)
+    update (toUpdate, buildData) (fp, modTime) = do
+      modTime' <- getModificationTime fp
+      let toUpdate' = if modTime < modTime' then fp:toUpdate else toUpdate
+      return (toUpdate', (fp, modTime'):buildData)
+    cacheFileIndex :: FilePath -> App ()
+    cacheFileIndex lexFilePath = do
+      liftIO . putStrLn $ "Rebuilding " ++ lexFilePath
+      Config{wnPaths} <- ask
+      let wnName = unsafeRassoc (lexFilePath ++ " is not in a WN dir") (takeDirectory lexFilePath) wnPaths
+      result <- parseLexicographerFile wnName lexFilePath
+      -- valid index has no duplicates, but may have invalid synsets
+      let validIndex = bimap id makeIndex result
+      let outFilePath = cachePath lexFilePath
+      liftIO . createDirectoryIfMissing True $ takeDirectory outFilePath
+      liftIO . encodeFile outFilePath
+        $ validate checkIndexNoDuplicates validIndex
+    cachePath path =
+      let (dirPath, fileName) = splitFileName path
+      in dirPath </> ".cache" </> fileName <.> "index"
+
 
 toWNDB :: FilePath -> App ()
 toWNDB outputDir = do

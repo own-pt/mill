@@ -1,16 +1,18 @@
 module Main where
 
-import Lib ( canonicalDir
-           , validateLexicographerFile
-           , validateLexicographerFiles
-           , lexicographerFilesJSON
-           , readConfig
-           , toWNDB
-           , Config(oneLang)
-           )
+import Lib (
+    App,
+    Config(oneLang),
+    canonicalDir,
+    lexicographerFilesJSON,
+    readConfig,
+    toWNDB,
+    validateLexicographerFile,
+    validateLexicographerFiles,
+      )
 
 import Data.Maybe (fromMaybe)
-import Control.Monad.Reader (ReaderT(..))
+import Control.Monad.RWS (ask, evalRWST, liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Options.Applicative ( (<|>), argument, command, customExecParser, eitherReader, flag, fullDesc
@@ -27,7 +29,7 @@ data ExportFormat = WNJSON | WNDB deriving (Show)
 
 data MillCommand = MillCommand ConfigDir OneLanguage MillSubCommand
 
-data MillSubCommand 
+data MillSubCommand
   = Validate FilePath
   | Export ExportFormat FilePath FilePath
              deriving (Show)
@@ -68,7 +70,7 @@ oneLanguage = option parseOneLanguage
   (metavar "LANG" <> short 'l' <> long "lang"
    <> help "Only consider WordNet LANG"
    <> value Nothing)
-  
+
 parseValidateCommand :: Parser MillSubCommand
 parseValidateCommand
   = Validate <$> validateParser
@@ -105,11 +107,17 @@ main = do
     $ info (helper <*> parseCommand)
     (fullDesc <> progDesc millProgDesc <> header "mill")
   case commandToRun of
-    MillCommand configDir oneLang subcommand ->
-      case subcommand of
-        Validate inputPath -> validate configDir oneLang inputPath
-        Export format inputPath outputPath
-          -> export configDir oneLang format inputPath outputPath
+    MillCommand configDir oneLang subcommand -> do
+      config <- getConfig configDir oneLang $ getInputPath subcommand
+      fst <$> evalRWST
+        (case subcommand of
+           Validate inputPath -> validate inputPath
+           Export format _ outputPath
+             -> export format outputPath)
+        config Nothing
+  where
+    getInputPath (Validate inputPath) = inputPath
+    getInputPath (Export _ inputPath _) = inputPath
 
 getConfig :: ConfigDir -> OneLanguage -> FilePath -> IO Config
 getConfig configDir' oneLang wnPath' = do
@@ -117,27 +125,22 @@ getConfig configDir' oneLang wnPath' = do
   configDir <- canonicalDir $ fromMaybe wnPath' configDir'
   readConfig oneLang wnPath configDir
 
-validate :: ConfigDir -> OneLanguage -> FilePath -> IO ()
-validate configDir oneLang inputPath = do
-  config <- getConfig configDir oneLang inputPath
-  isDirectory <- doesDirectoryExist inputPath
-  runReaderT (if isDirectory
-               then validateLexicographerFiles
-               else validateLexicographerFile inputPath)
-    config
+validate :: FilePath -> App ()
+validate inputPath = do
+  isDirectory <- liftIO $ doesDirectoryExist inputPath
+  if isDirectory
+    then validateLexicographerFiles
+    else validateLexicographerFile inputPath
 
-export :: ConfigDir -> OneLanguage -> ExportFormat -> FilePath -> FilePath -> IO ()
-export configDir oneLang format inputPath outputPath = do
-  config <- getConfig configDir oneLang inputPath
+
+export :: ExportFormat -> FilePath -> App ()
+export format outputPath =
   case format of
-    WNJSON -> exportJSON outputPath config
-    WNDB -> exportWNDB outputPath config
-
-exportJSON :: FilePath -> Config -> IO ()
-exportJSON outputFile = runReaderT $ lexicographerFilesJSON outputFile
-
-exportWNDB :: FilePath -> Config -> IO ()
-exportWNDB outputDir config =
-  case oneLang config of
+    WNJSON -> lexicographerFilesJSON outputPath
+    WNDB -> exportWNDB outputPath
+  where
+    exportWNDB outputDir = do
+      config <- ask
+      case oneLang config of
         Nothing -> error "You must specify a language for WNDB export"
-        Just _ -> runReaderT (toWNDB outputDir) config
+        Just _ -> toWNDB outputDir
